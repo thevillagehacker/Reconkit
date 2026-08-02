@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "qwen3:8b",
+    "base_url": "http://192.168.1.50:11434",
+    "api_key": "",
+    "temperature": 0.2,
+    "timeout": 300,
+    "use_openai_compat": false
+  },
+  "orchestrator": {
+    "max_steps": 12,
+    "skip_analyst": false,
+    "modules": []
+  },
+  "network": {
+    "notes": "Copy into config/agent_config.json (or run: python recon_agents.py config set --base-url http://WINDOWS_HOST_IP:11434). Use the Windows host IP where Ollama listens — NOT the Kali/VM IP and NOT 127.0.0.1 from the VM. Prove with: curl http://HOST:11434/api/tags. Common host IPs: LAN (e.g. 192.168.1.4), VirtualBox host-only 192.168.56.1, some NAT 10.0.2.2, Docker Desktop host.docker.internal."
+  }
+}

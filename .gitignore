@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.zip
+*.png
+.DS_Store
+.venv/
+venv/
+*.log
+.env
+secrets.env
+# large third-party clones used as research only
+git_skills/

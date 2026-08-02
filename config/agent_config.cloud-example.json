@@ -1,0 +1,50 @@
+{
+  "_readme": [
+    "CLOUD LLM example for recon agents (full agent_config.json shape).",
+    "",
+    "HOW TO USE (pick one path):",
+    "",
+    "  A) CLI switch (recommended — fills base_url/model presets):",
+    "     setx XAI_API_KEY \"xai-your-key-here\"",
+    "     python recon_agents.py config set --provider xai --model grok-2-latest",
+    "     python recon_agents.py check-llm",
+    "",
+    "  B) Copy this file over the active config:",
+    "     copy config\\agent_config.cloud-example.json config\\agent_config.json",
+    "     Then set the API key in the environment (do NOT commit keys):",
+    "       PowerShell:  $env:XAI_API_KEY = \"xai-...\"",
+    "       cmd:         setx XAI_API_KEY \"xai-...\"",
+    "       bash:        export XAI_API_KEY=xai-...",
+    "",
+    "  C) One-shot without saving config:",
+    "     python recon_agents.py run --target example.com --provider xai --model grok-2-latest",
+    "",
+    "LIST PROVIDERS:  python recon_agents.py providers",
+    "TEST:           python recon_agents.py check-llm",
+    "SHELL:           /config set --provider xai --model grok-2-latest",
+    "                 /check-llm",
+    "",
+    "Swap the llm block below for another cloud provider — see",
+    "config/agent_config.cloud-presets.json for ready-made llm blocks.",
+    "",
+    "NEVER put real API keys in this file if you commit it to git.",
+    "Prefer env vars: XAI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, etc."
+  ],
+  "llm": {
+    "provider": "xai",
+    "model": "grok-2-latest",
+    "base_url": "https://api.x.ai/v1",
+    "api_key": "",
+    "temperature": 0.2,
+    "timeout": 120,
+    "use_openai_compat": true
+  },
+  "orchestrator": {
+    "max_steps": 12,
+    "skip_analyst": false,
+    "modules": []
+  },
+  "network": {
+    "notes": "Cloud mode: keys from env (XAI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY / OPENROUTER_API_KEY / GROQ_API_KEY). Leave llm.api_key empty. base_url is the provider default — only change for custom gateways."
+  }
+}

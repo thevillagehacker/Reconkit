@@ -1,0 +1,160 @@
+{
+  "_comment": "Ready-made llm blocks for cloud providers. Copy ONE block into agent_config.json under \"llm\", or use: python recon_agents.py config set --provider <name>. Never commit real keys — use env vars listed in key_env.",
+  "presets": {
+    "xai_grok": {
+      "key_env": "XAI_API_KEY",
+      "setup_powershell": [
+        "$env:XAI_API_KEY = 'xai-...'",
+        "python recon_agents.py config set --provider xai --model grok-2-latest",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "xai",
+        "model": "grok-2-latest",
+        "base_url": "https://api.x.ai/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    },
+    "anthropic_claude": {
+      "key_env": "ANTHROPIC_API_KEY",
+      "setup_powershell": [
+        "$env:ANTHROPIC_API_KEY = 'sk-ant-...'",
+        "python recon_agents.py config set --provider anthropic --model claude-sonnet-4-20250514",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "base_url": "https://api.anthropic.com",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": false
+      }
+    },
+    "openai": {
+      "key_env": "OPENAI_API_KEY",
+      "setup_powershell": [
+        "$env:OPENAI_API_KEY = 'sk-...'",
+        "python recon_agents.py config set --provider openai --model gpt-4o-mini",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    },
+    "google_gemini": {
+      "key_env": "GOOGLE_API_KEY",
+      "setup_powershell": [
+        "$env:GOOGLE_API_KEY = '...'",
+        "python recon_agents.py config set --provider google --model gemini-2.0-flash",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "google",
+        "model": "gemini-2.0-flash",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    },
+    "openrouter": {
+      "key_env": "OPENROUTER_API_KEY",
+      "setup_powershell": [
+        "$env:OPENROUTER_API_KEY = '...'",
+        "python recon_agents.py config set --provider openrouter --model anthropic/claude-3.5-sonnet",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-3.5-sonnet",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    },
+    "groq": {
+      "key_env": "GROQ_API_KEY",
+      "setup_powershell": [
+        "$env:GROQ_API_KEY = '...'",
+        "python recon_agents.py config set --provider groq --model llama-3.3-70b-versatile",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "groq",
+        "model": "llama-3.3-70b-versatile",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 90,
+        "use_openai_compat": true
+      }
+    },
+    "deepseek": {
+      "key_env": "DEEPSEEK_API_KEY",
+      "setup_powershell": [
+        "$env:DEEPSEEK_API_KEY = '...'",
+        "python recon_agents.py config set --provider deepseek --model deepseek-chat",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    },
+    "custom_gateway": {
+      "key_env": "RECON_LLM_API_KEY",
+      "setup_powershell": [
+        "$env:RECON_LLM_API_KEY = '...'",
+        "python recon_agents.py config set --provider custom --base-url https://my-gateway.example.com/v1 --model my-model",
+        "python recon_agents.py check-llm"
+      ],
+      "llm": {
+        "provider": "custom",
+        "model": "my-model",
+        "base_url": "https://my-gateway.example.com/v1",
+        "api_key": "",
+        "temperature": 0.2,
+        "timeout": 120,
+        "use_openai_compat": true
+      }
+    }
+  },
+  "full_config_template": {
+    "llm": {
+      "provider": "xai",
+      "model": "grok-2-latest",
+      "base_url": "https://api.x.ai/v1",
+      "api_key": "",
+      "temperature": 0.2,
+      "timeout": 120,
+      "use_openai_compat": true
+    },
+    "orchestrator": {
+      "max_steps": 12,
+      "skip_analyst": false,
+      "modules": []
+    },
+    "network": {
+      "notes": "Cloud keys via env only."
+    }
+  }
+}

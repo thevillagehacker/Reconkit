@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "qwen3:8b",
+    "base_url": "http://127.0.0.1:11434",
+    "api_key": "",
+    "temperature": 0.2,
+    "timeout": 300,
+    "use_openai_compat": false
+  },
+  "orchestrator": {
+    "max_steps": 12,
+    "skip_analyst": false,
+    "modules": []
+  },
+  "network": {
+    "notes": "EDIT llm.base_url when agents run in a VM and Ollama is on the Windows host. Example: http://192.168.1.50:11434  On Windows host run: setx OLLAMA_HOST 0.0.0.0  then restart Ollama, open firewall TCP 11434, and verify from VM: curl http://<HOST_IP>:11434/api/tags"
+  }
+}

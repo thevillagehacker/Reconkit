@@ -1,0 +1,31 @@
+{
+  "name": "example-web",
+  "display_name": "Example Web App Program",
+  "description": "Sample profile: prioritizes authz, XSS, takeover; de-emphasizes generic nuclei noise",
+  "scope_includes": ["*.example.com", "example.com"],
+  "scope_excludes": ["blog.example.com", "status.example.com"],
+  "max_risk_class": "safe",
+  "notable_threshold": 35,
+  "bounty_weights": {
+    "xss": 1.35,
+    "sqli": 1.15,
+    "ssrf": 1.4,
+    "ssti": 1.3,
+    "takeover": 1.5,
+    "secret": 1.45,
+    "idor": 1.5,
+    "auth": 1.4,
+    "cloud": 1.2,
+    "nuclei": 0.85,
+    "info": 0.5,
+    "default": 1.0
+  },
+  "severity_bonus": {
+    "critical": 1.2,
+    "high": 1.1,
+    "medium": 1.0,
+    "low": 0.85,
+    "info": 0.7
+  },
+  "notes": "Activate with: /program set example-web  or  RECON_PROGRAM=example-web"
+}

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>RECONKIT // BRIDGE</title>
+  <meta name="theme-color" content="#0a0a0a" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css?v=3.12-tactical" />
+</head>
+<body class="bridge">
+  <div class="atmosphere" aria-hidden="true">
+    <div class="stars" id="stars"></div>
+    <div class="scan-veil"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <!-- Top rail -->
+  <header class="bridge-header">
+    <div class="lcars-cap left"></div>
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">◈</div>
+      <div>
+        <div class="brand-title">RECONKIT <span class="dim">//</span> BRIDGE</div>
+        <div class="brand-sub" id="missionBanner">MISSION STANDBY · awaiting telemetry</div>
+      </div>
+    </div>
+    <nav class="bridge-tabs" role="tablist">
+      <button type="button" class="btab active" data-view="mission" id="tabMission">MISSION</button>
+      <button type="button" class="btab" data-view="recon" id="tabRecon">SENSORS</button>
+      <button type="button" class="btab" data-view="proofs" id="tabProofs">PROOF LOCKER</button>
+      <button type="button" class="btab" data-view="graph" id="tabGraph">TACTICAL MAP</button>
+      <button type="button" class="btab" data-view="insights" id="tabInsights">SCIENCE</button>
+    </nav>
+    <div class="header-actions">
+      <span id="alertPill" class="alert-pill green">CONDITION GREEN</span>
+      <span id="liveBadge" class="live-badge"><span class="dot"></span>LIVE OFF</span>
+      <button type="button" id="btnLive" class="btn ghost">Live</button>
+      <button type="button" id="btnRefresh" class="btn primary">$ reindex</button>
+    </div>
+    <div class="lcars-cap right"></div>
+  </header>
+
+  <main class="bridge-layout">
+    <!-- Fleet / targets rail -->
+    <aside class="panel fleet-rail">
+      <div class="panel-h">
+        <h2>FLEET / TARGETS</h2>
+        <input id="targetSearch" type="search" placeholder="Filter ships…" autocomplete="off" />
+      </div>
+      <button type="button" class="fleet-all active" id="btnAllTargets" data-target="">
+        ◈ FLEET-WIDE SWEEP
+      </button>
+      <ul id="targetList" class="target-list"></ul>
+      <div class="panel-f" id="targetCount">0 sectors</div>
+    </aside>
+
+    <section class="main-stage">
+      <!-- ========== LIVE PHASE TRACKER ========== -->
+      <div id="viewMission" class="view active">
+        <div class="mission-hero compact-hero">
+          <div class="logo-dock panel compact-dock" id="logoDock" aria-label="RECONKIT cyber ops">
+            <div class="logo-slot wordmark" id="logoWordmark"></div>
+            <div class="logo-slot flagship" id="logoFlagship" hidden></div>
+            <div class="logo-slot dock" id="logoDockArt" hidden></div>
+          </div>
+          <div>
+            <div class="mission-kicker" id="missionKicker">Live phase tracker · cyber ops</div>
+            <h1 class="mission-title" id="missionTitle">Live phase tracker</h1>
+            <p class="mission-lede">
+              Each tile is a scan phase. Active runs highlight the current module and tool.
+              Telemetry: <code>~/.reconkit/live_mission.json</code>
+            </p>
+          </div>
+          <div class="mission-meta-pills" id="missionPills">
+            <span class="mpill">—</span>
+          </div>
+        </div>
+
+        <!-- Live status strip -->
+        <div class="live-strip panel" id="liveStrip">
+          <div class="live-strip-main">
+            <span class="live-dot" id="liveDot"></span>
+            <span class="live-status" id="liveStatusLabel">IDLE</span>
+            <span class="live-msg" id="liveMessage">awaiting /run …</span>
+          </div>
+          <div class="live-strip-meta">
+            <span id="livePhaseFrac">0 / 0 phases</span>
+            <span id="liveHostFrac">hosts —</span>
+            <span id="liveElapsed">0s</span>
+          </div>
+          <div class="live-progress">
+            <div class="live-progress-bar" id="liveProgressBar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- KPI triad -->
+        <div class="kpi-triad">
+          <div class="kpi-card">
+            <div class="kpi-l">Phases complete</div>
+            <div class="kpi-v" id="kpiActions">0</div>
+            <div class="kpi-s" id="kpiActionsSub">of 0 in this mission</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-l">Active phase / ship</div>
+            <div class="kpi-v sm" id="kpiPhase">—</div>
+            <div class="kpi-s" id="kpiPhaseSub">no scan in progress</div>
+          </div>
+          <div class="kpi-card" id="kpiBlastCard">
+            <div class="kpi-l">Run control</div>
+            <div class="kpi-v sm" id="kpiBlast">IDLE</div>
+            <div class="kpi-s" id="kpiBlastSub">start a scan with /run</div>
+          </div>
+        </div>
+
+        <!-- Phase tiles (one per module in the run) -->
+        <div class="panel phase-tiles-panel">
+          <div class="panel-h">
+            <h2>PHASE TILES</h2>
+            <span class="chip" id="phaseTilesChip">live · one tile per scan phase</span>
+          </div>
+          <div id="phaseTiles" class="phase-tiles"></div>
+        </div>
+
+        <div class="mission-grid live-grid">
+          <div class="panel chain-panel">
+            <div class="panel-h">
+              <h2>MISSION CHAIN · LIVE</h2>
+              <span class="chip">lights as phases complete</span>
+            </div>
+            <div class="chain-canvas-wrap">
+              <svg id="chainSvg" class="chain-svg" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet"></svg>
+            </div>
+            <div class="stage-legend">
+              <span><i class="lg s1"></i> STAGE 1 · OUTER SENSOR NET</span>
+              <span><i class="lg s2"></i> STAGE 2 · SURFACE MAP</span>
+              <span><i class="lg s3"></i> STAGE 3 · STRIKE / CLOUD</span>
+            </div>
+          </div>
+
+          <div class="panel fleet-panel">
+            <div class="panel-h">
+              <h2>FLEET BOARD</h2>
+              <span class="chip">modules as starships</span>
+            </div>
+            <div id="fleetBoard" class="fleet-board"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== SENSORS (classic recon table) ========== -->
+      <div id="viewRecon" class="view">
+        <div class="kpi-row" id="kpiRowRecon">
+          <div class="kpi"><div class="kpi-label">Records</div><div class="kpi-val" id="kpiFindings">—</div></div>
+          <div class="kpi"><div class="kpi-label">Targets</div><div class="kpi-val" id="kpiTargets">—</div></div>
+          <div class="kpi kpi-crit"><div class="kpi-label">Critical</div><div class="kpi-val" id="kpiCrit">—</div></div>
+          <div class="kpi kpi-high"><div class="kpi-label">High</div><div class="kpi-val" id="kpiHigh">—</div></div>
+          <div class="kpi kpi-med"><div class="kpi-label">Medium</div><div class="kpi-val" id="kpiMed">—</div></div>
+          <div class="kpi"><div class="kpi-label">Proofs</div><div class="kpi-val" id="kpiProofsMini">—</div></div>
+        </div>
+        <div class="panel filters-panel">
+          <div class="panel-h"><h2>Filters</h2><span class="chip" id="activeTargetChip">all targets</span></div>
+          <div class="filters">
+            <label>Module<select id="fltModule"><option value="">all</option></select></label>
+            <label>Severity
+              <select id="fltSeverity">
+                <option value="">all</option>
+                <option value="critical">critical</option>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+                <option value="info">info</option>
+              </select>
+            </label>
+            <label>Type
+              <select id="fltType">
+                <option value="">all</option>
+                <option value="subdomain">subdomain</option>
+                <option value="host">alive host</option>
+                <option value="url">url</option>
+                <option value="secret">secret</option>
+                <option value="vuln">vuln</option>
+                <option value="param">param</option>
+                <option value="cloud">cloud</option>
+                <option value="tls">tls</option>
+              </select>
+            </label>
+            <label>Notable
+              <select id="fltNotable">
+                <option value="">all</option>
+                <option value="1">notable only</option>
+              </select>
+            </label>
+            <label class="grow">Search<input id="fltQuery" type="search" placeholder="asset, title…" /></label>
+            <div class="filter-actions">
+              <button type="button" id="btnApply" class="btn primary">Apply</button>
+              <button type="button" id="btnClear" class="btn ghost">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel table-panel">
+          <div class="panel-h"><h2>Sensor log</h2><span id="reconPageInfo" class="chip">—</span></div>
+          <div class="table-wrap">
+            <table class="data-table" id="findingsTable">
+              <thead>
+                <tr>
+                  <th>Sev</th><th>Module</th><th>Type</th><th>Title</th><th>Asset</th><th>Score</th>
+                </tr>
+              </thead>
+              <tbody id="findingsBody"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button type="button" id="btnPrev" class="btn ghost">Prev</button>
+            <button type="button" id="btnNext" class="btn ghost">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Proofs / Graph / Insights simplified shells reusing API -->
+      <div id="viewProofs" class="view">
+        <div class="panel">
+          <div class="panel-h"><h2>PROOF LOCKER</h2><span class="chip" id="proofMeta">—</span></div>
+          <div class="filters">
+            <label>Status
+              <select id="fltProofStatus">
+                <option value="">all</option>
+                <option value="confirmed">confirmed</option>
+                <option value="needs_manual">needs_manual</option>
+                <option value="rejected">rejected</option>
+              </select>
+            </label>
+            <button type="button" id="btnProofApply" class="btn primary">Apply</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Status</th><th>Technique</th><th>Target</th><th>Title</th></tr></thead>
+              <tbody id="proofsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="viewGraph" class="view">
+        <div class="panel tactical-panel">
+          <div class="panel-h">
+            <h2>TACTICAL MAP</h2>
+            <label class="inline">min score <input id="graphMinScore" type="number" value="40" min="0" max="100" /></label>
+            <div class="zoom-controls" role="group" aria-label="Map zoom">
+              <button type="button" id="btnZoomOut" class="btn ghost" title="Zoom out">−</button>
+              <span class="zoom-label" id="zoomLabel">100%</span>
+              <button type="button" id="btnZoomIn" class="btn ghost" title="Zoom in">+</button>
+              <button type="button" id="btnZoomReset" class="btn ghost" title="Reset view">⌂ Fit</button>
+            </div>
+            <button type="button" id="btnGraphReload" class="btn primary">Reload</button>
+          </div>
+          <div class="tactical-body">
+            <div class="tactical-viewport graph-wrap" id="graphViewport" title="Scroll to zoom · drag canvas to pan · drag node · click hostname for detail">
+              <svg id="graphSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+              <div id="graphEmpty" class="graph-empty hidden">No graph data — run recon + reindex first.</div>
+              <div class="tactical-hud" id="tacticalHud">
+                <span>◈ SENSOR GRID</span>
+                <span id="graphStats">0 nodes</span>
+                <span class="hint">wheel zoom · drag pan · click hostname</span>
+              </div>
+            </div>
+            <aside class="tactical-fleet" id="tacticalFleet">
+              <div class="panel-h tight"><h2>NODE DETAIL</h2><span class="chip" id="nodeDetailChip">click a host</span></div>
+              <div id="tacticalFleetList" class="tactical-fleet-list">
+                <p class="muted" style="padding:8px">Click a hostname on the map to inspect target, module, score, and linked evidence.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      <div id="viewInsights" class="view">
+        <div class="panel">
+          <div class="panel-h"><h2>SCIENCE · CHARTS</h2></div>
+          <div id="insightsRoot" class="insights-root">Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Detail drawer -->
+    <aside class="panel detail-rail" id="detailRail">
+      <div class="panel-h"><h2>VIEWSCREEN</h2></div>
+      <div id="detailBody" class="detail-body">
+        <p class="muted">Select a stream action, ship, or sensor row.</p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="bridge-footer">
+    <span id="footerStatus">BRIDGE ONLINE</span>
+    <span id="programBadge">program: default</span>
+    <span>v3.0.0 · STARFLEET RECON CONSOLE</span>
+  </footer>
+
+  <script src="/ships.js?v=3.12-tactical"></script>
+  <script src="/app.js?v=3.12-tactical"></script>
+</body>
+</html>

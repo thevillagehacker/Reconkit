@@ -1,0 +1,74 @@
+{
+  "_comment": "Copy one llm block into agent_config.json (or use config set). Never commit real API keys. Prefer drop-in: agent_config.cloud-example.json + CLOUD_LLM_SETUP.md + agent_config.cloud-presets.json.",
+  "examples": {
+    "ollama_local": {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "base_url": "http://127.0.0.1:11434",
+      "api_key": "",
+      "use_openai_compat": false
+    },
+    "ollama_vm_to_windows": {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "base_url": "http://192.168.1.4:11434",
+      "api_key": ""
+    },
+    "xai_grok": {
+      "provider": "xai",
+      "model": "grok-2-latest",
+      "base_url": "https://api.x.ai/v1",
+      "api_key": "",
+      "timeout": 120
+    },
+    "anthropic_claude": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "",
+      "timeout": 120
+    },
+    "openai": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": ""
+    },
+    "google_gemini": {
+      "provider": "google",
+      "model": "gemini-2.0-flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "api_key": ""
+    },
+    "google_gemma": {
+      "provider": "gemma",
+      "model": "gemma-3-27b-it",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "api_key": ""
+    },
+    "openrouter": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-3.5-sonnet",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": ""
+    },
+    "groq": {
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key": ""
+    },
+    "deepseek": {
+      "provider": "deepseek",
+      "model": "deepseek-chat",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": ""
+    },
+    "custom_openai_compat": {
+      "provider": "custom",
+      "model": "my-model",
+      "base_url": "https://my-gateway.example.com/v1",
+      "api_key": ""
+    }
+  }
+}
