@@ -41,6 +41,8 @@ def heuristic_tier(finding: dict[str, Any]) -> dict[str, Any]:
     sev = str(finding.get("severity") or "info").lower()
     score = int(finding.get("score") or 0)
     mod = str(finding.get("module") or "").lower()
+    title = str(finding.get("title") or "").lower()
+    source = str(finding.get("source_file") or "").lower()
 
     for pat in _C0_PATTERNS:
         if re.search(pat, b):
@@ -62,32 +64,33 @@ def heuristic_tier(finding: dict[str, Any]) -> dict[str, Any]:
             "next": "prove:takeover_fingerprint" if "takeover" in b else "manual",
             "method": "heuristic",
         }
-    if mod == "xss" or "xss" in b or "dalfox" in b:
+    if mod == "xss" or "xss" in title or "dalfox" in b:
         return {
             "tier": "C1",
             "why": "xss candidate",
             "next": "prove:xss_reflect",
             "method": "heuristic",
         }
-    if mod == "sqli" or "sqli" in b:
+    if mod == "sqli" or "sqli" in title or "sqli" in source:
         return {
             "tier": "C1",
             "why": "sqli candidate",
             "next": "prove:sqli_boolean",
             "method": "heuristic",
         }
-    if "ssrf" in b:
-        return {
-            "tier": "C1",
-            "why": "ssrf candidate",
-            "next": "prove:ssrf_canary_review",
-            "method": "heuristic",
-        }
-    if "ssti" in b:
+    # Title/source, not the combined module name `ssrf_ssti` (contains both tokens).
+    if "ssti" in title or "ssti" in source:
         return {
             "tier": "C1",
             "why": "ssti candidate",
             "next": "prove:ssti_math",
+            "method": "heuristic",
+        }
+    if "ssrf" in title or "ssrf" in source or mod == "ssrf_ssti":
+        return {
+            "tier": "C1",
+            "why": "ssrf candidate",
+            "next": "prove:ssrf_canary_review",
             "method": "heuristic",
         }
     if mod == "nuclei" or "cve-" in b:

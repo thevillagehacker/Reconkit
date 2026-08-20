@@ -29,10 +29,13 @@ class AgentResult:
 
 # Agent → modules it is allowed / expected to execute
 AGENT_MODULES: dict[str, list[str]] = {
-    "subdomain": ["subdomains"],
-    "discovery": ["dns", "httpprobe", "tls"],
-    "content": ["crawl", "js", "params", "content"],
-    "vuln": ["xss", "sqli", "ssrf_ssti", "nuclei", "cloud"],
+    "subdomain": ["subdomains", "permute"],
+    "discovery": ["dns", "ports", "httpprobe", "tls", "wellknown", "osint"],
+    "content": ["crawl", "js", "jsintel", "params", "apis", "content", "bypass403", "gfextra"],
+    "vuln": [
+        "xss", "sqli", "ssrf_ssti", "redirect", "cors", "graphql",
+        "nuclei", "cloud", "takeover_plus", "gitrecon",
+    ],
     "visual": ["screenshots"],
 }
 

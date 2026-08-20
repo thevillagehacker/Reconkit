@@ -1,9 +1,8 @@
 """
-Mission timeline builder for the Starfleet Bridge console (v3.0.0).
+Scan timeline builder for the reconkit dashboard.
 
-Maps recon modules → starship fleet units and builds a phase-ordered
-replay stream (inspired by HF "Anatomy of a Frontier Lab Agent Intrusion"
-timeline: play/pause, speed, phase activity, live action stream, chain map).
+Maps recon modules to pipeline phases and builds a phase-ordered
+replay stream (play/pause, speed, phase activity, action stream, chain map).
 """
 
 from __future__ import annotations
@@ -11,120 +10,34 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-# Recon pipeline order — cyber ops node names (shell.fleet_art)
 MISSION_PHASES: list[dict[str, Any]] = [
-    {
-        "id": "subdomains",
-        "ship": "NODE PATHFINDER",
-        "class": "Scout",
-        "role": "Passive sensors — subdomain constellation map",
-        "stage": 1,
-        "color": "#ff6b7a",
-    },
-    {
-        "id": "dns",
-        "ship": "NODE NAVIGATOR",
-        "class": "Science",
-        "role": "DNS / CNAME hazard charting",
-        "stage": 1,
-        "color": "#ff4d5a",
-    },
-    {
-        "id": "httpprobe",
-        "ship": "NODE SENSOR",
-        "class": "Probe",
-        "role": "Active sensor sweep — live host signatures",
-        "stage": 1,
-        "color": "#e11d2e",
-    },
-    {
-        "id": "tls",
-        "ship": "NODE CIPHER",
-        "class": "Escort",
-        "role": "TLS / JARM fingerprint analysis",
-        "stage": 1,
-        "color": "#ff8a94",
-    },
-    {
-        "id": "crawl",
-        "ship": "NODE SPIDER",
-        "class": "Explorer",
-        "role": "Surface map — crawl & URL harvest",
-        "stage": 2,
-        "color": "#fb7185",
-    },
-    {
-        "id": "js",
-        "ship": "NODE ARCHIVE",
-        "class": "Intel",
-        "role": "JS secrets / endpoint extraction",
-        "stage": 2,
-        "color": "#f43f5e",
-    },
-    {
-        "id": "params",
-        "ship": "NODE KEYMASTER",
-        "class": "Ops",
-        "role": "Parameter mining — latent channels",
-        "stage": 2,
-        "color": "#ff2a3d",
-    },
-    {
-        "id": "content",
-        "ship": "NODE DIG",
-        "class": "Survey",
-        "role": "Content excavation — paths & fuzz",
-        "stage": 2,
-        "color": "#e11d48",
-    },
-    {
-        "id": "xss",
-        "ship": "NODE MIRROR",
-        "class": "Tactical",
-        "role": "Reflection hazard scan — XSS canaries",
-        "stage": 3,
-        "color": "#ef4444",
-    },
-    {
-        "id": "sqli",
-        "ship": "NODE ORACLE",
-        "class": "Tactical",
-        "role": "Query-plane canaries — SQLi detection",
-        "stage": 3,
-        "color": "#dc2626",
-    },
-    {
-        "id": "ssrf_ssti",
-        "ship": "NODE WORMHOLE",
-        "class": "Tactical",
-        "role": "Trust-boundary probes — SSRF / SSTI",
-        "stage": 3,
-        "color": "#b91c1c",
-    },
-    {
-        "id": "nuclei",
-        "ship": "NODE STRIKE",
-        "class": "Battleship",
-        "role": "Template volleys — CVE / misconfig",
-        "stage": 3,
-        "color": "#ff1f33",
-    },
-    {
-        "id": "cloud",
-        "ship": "NODE NEBULA",
-        "class": "Explorer",
-        "role": "Cloud relic survey — S3 / Azure / GCP",
-        "stage": 3,
-        "color": "#f87171",
-    },
-    {
-        "id": "screenshots",
-        "ship": "NODE VIEWSCREEN",
-        "class": "Support",
-        "role": "Visual recon — capture grid",
-        "stage": 3,
-        "color": "#9a8e92",
-    },
+    {"id": "subdomains", "ship": "Subdomain enum", "class": "passive", "role": "Passive subdomain sources", "stage": 1, "color": "#ff6b7a"},
+    {"id": "permute", "ship": "DNS permute", "class": "passive", "role": "Capped DNS permutations", "stage": 1, "color": "#ff8a94"},
+    {"id": "dns", "ship": "DNS records", "class": "passive", "role": "DNS / CNAME records", "stage": 1, "color": "#ff4d5a"},
+    {"id": "ports", "ship": "Ports", "class": "active", "role": "In-scope naabu connect-scan", "stage": 1, "color": "#fb7185"},
+    {"id": "httpprobe", "ship": "HTTP probe", "class": "active", "role": "Alive hosts, titles, tech", "stage": 1, "color": "#e11d2e"},
+    {"id": "tls", "ship": "TLS fingerprint", "class": "active", "role": "TLS / JARM", "stage": 1, "color": "#ff8a94"},
+    {"id": "wellknown", "ship": "Well-known", "class": "discovery", "role": "robots / security.txt / OpenID", "stage": 2, "color": "#fda4af"},
+    {"id": "crawl", "ship": "URL crawl", "class": "discovery", "role": "Crawl and URL harvest", "stage": 2, "color": "#fb7185"},
+    {"id": "js", "ship": "JavaScript", "class": "discovery", "role": "JS secrets / endpoints", "stage": 2, "color": "#f43f5e"},
+    {"id": "jsintel", "ship": "JS intel", "class": "discovery", "role": "Sourcemaps, routes, lib versions", "stage": 2, "color": "#fb7185"},
+    {"id": "params", "ship": "Parameters", "class": "discovery", "role": "Parameter names and hidden params", "stage": 2, "color": "#ff2a3d"},
+    {"id": "apis", "ship": "API surface", "class": "discovery", "role": "OpenAPI / GraphQL / IDOR-shaped", "stage": 2, "color": "#e11d48"},
+    {"id": "content", "ship": "Content discovery", "class": "discovery", "role": "Sensitive paths and directory fuzz", "stage": 2, "color": "#e11d48"},
+    {"id": "bypass403", "ship": "403 bypass", "class": "detection", "role": "Header/path 401/403 probes", "stage": 2, "color": "#f43f5e"},
+    {"id": "gfextra", "ship": "gf extras", "class": "discovery", "role": "redirect / lfi / interesting params", "stage": 2, "color": "#fb7185"},
+    {"id": "xss", "ship": "XSS canaries", "class": "detection", "role": "Reflected XSS detection", "stage": 3, "color": "#ef4444"},
+    {"id": "sqli", "ship": "SQLi canaries", "class": "detection", "role": "SQL injection canaries", "stage": 3, "color": "#dc2626"},
+    {"id": "ssrf_ssti", "ship": "SSRF / SSTI", "class": "detection", "role": "SSRF and SSTI canaries", "stage": 3, "color": "#b91c1c"},
+    {"id": "redirect", "ship": "Open redirect", "class": "detection", "role": "Redirect canary bounce", "stage": 3, "color": "#ef4444"},
+    {"id": "cors", "ship": "CORS", "class": "detection", "role": "Origin ACAO reflection", "stage": 3, "color": "#dc2626"},
+    {"id": "graphql", "ship": "GraphQL", "class": "detection", "role": "{__typename} endpoint detect", "stage": 3, "color": "#b91c1c"},
+    {"id": "nuclei", "ship": "Nuclei", "class": "detection", "role": "CVE / takeover / misconfig templates", "stage": 3, "color": "#ff1f33"},
+    {"id": "cloud", "ship": "Cloud assets", "class": "detection", "role": "S3 / Azure / GCP / Firebase refs", "stage": 3, "color": "#f87171"},
+    {"id": "takeover_plus", "ship": "Takeover+", "class": "detection", "role": "npm / dangling CDN 404s", "stage": 3, "color": "#ef4444"},
+    {"id": "osint", "ship": "OSINT", "class": "passive", "role": "Shodan/Censys this hostname only", "stage": 3, "color": "#fda4af"},
+    {"id": "gitrecon", "ship": "Git recon", "class": "passive", "role": "GitHub URLs + optional trufflehog", "stage": 3, "color": "#f87171"},
+    {"id": "screenshots", "ship": "Screenshots", "class": "visual", "role": "Screenshots of alive hosts", "stage": 3, "color": "#9a8e92"},
 ]
 
 PHASE_BY_ID = {p["id"]: p for p in MISSION_PHASES}
@@ -132,17 +45,17 @@ PHASE_ORDER = {p["id"]: i for i, p in enumerate(MISSION_PHASES)}
 
 # Trust-boundary chain nodes for the mission map (HF-style attack chain)
 CHAIN_NODES: list[dict[str, Any]] = [
-    {"id": "scope", "label": "AUTHORIZED SCOPE", "zone": "bridge", "x": 8, "y": 50},
-    {"id": "passive", "label": "PASSIVE SENSOR GRID", "zone": "outer", "x": 22, "y": 28},
-    {"id": "dns_plane", "label": "DNS HAZARD PLANE", "zone": "outer", "x": 22, "y": 72},
-    {"id": "live_hosts", "label": "LIVE HOST CONSTELLATION", "zone": "mid", "x": 40, "y": 50},
-    {"id": "tls_shield", "label": "TLS SHIELD ANALYSIS", "zone": "mid", "x": 52, "y": 28},
-    {"id": "surface", "label": "SURFACE MAP (CRAWL/JS)", "zone": "mid", "x": 52, "y": 72},
-    {"id": "params", "label": "PARAM CHANNELS", "zone": "inner", "x": 68, "y": 40},
-    {"id": "vuln", "label": "VULN STRIKE GRID", "zone": "inner", "x": 68, "y": 65},
-    {"id": "cloud", "label": "CLOUD RELIC FIELD", "zone": "core", "x": 84, "y": 35},
-    {"id": "proof", "label": "PROOF LOCKER", "zone": "core", "x": 84, "y": 65},
-    {"id": "report", "label": "MISSION BRIEFING", "zone": "core", "x": 94, "y": 50},
+    {"id": "scope", "label": "SCOPE", "zone": "start", "x": 8, "y": 50},
+    {"id": "passive", "label": "SUBDOMAINS", "zone": "outer", "x": 22, "y": 28},
+    {"id": "dns_plane", "label": "DNS", "zone": "outer", "x": 22, "y": 72},
+    {"id": "live_hosts", "label": "ALIVE HOSTS", "zone": "mid", "x": 40, "y": 50},
+    {"id": "tls_shield", "label": "TLS", "zone": "mid", "x": 52, "y": 28},
+    {"id": "surface", "label": "CRAWL / JS", "zone": "mid", "x": 52, "y": 72},
+    {"id": "params", "label": "PARAMS", "zone": "inner", "x": 68, "y": 40},
+    {"id": "vuln", "label": "DETECTION", "zone": "inner", "x": 68, "y": 65},
+    {"id": "cloud", "label": "CLOUD", "zone": "core", "x": 84, "y": 35},
+    {"id": "proof", "label": "PROOFS", "zone": "core", "x": 84, "y": 65},
+    {"id": "report", "label": "REPORT", "zone": "core", "x": 94, "y": 50},
 ]
 
 CHAIN_EDGES: list[dict[str, str]] = [
@@ -164,18 +77,31 @@ CHAIN_EDGES: list[dict[str, str]] = [
 
 MODULE_TO_NODES: dict[str, list[str]] = {
     "subdomains": ["passive"],
+    "permute": ["passive", "dns_plane"],
     "dns": ["dns_plane"],
+    "ports": ["live_hosts"],
     "httpprobe": ["live_hosts"],
     "tls": ["tls_shield"],
+    "wellknown": ["surface"],
     "crawl": ["surface"],
     "js": ["surface"],
+    "jsintel": ["surface"],
     "params": ["params"],
+    "apis": ["params", "surface"],
     "content": ["params", "surface"],
+    "bypass403": ["vuln"],
+    "gfextra": ["params"],
     "xss": ["vuln"],
     "sqli": ["vuln"],
     "ssrf_ssti": ["vuln"],
+    "redirect": ["vuln"],
+    "cors": ["vuln"],
+    "graphql": ["vuln"],
     "nuclei": ["vuln"],
     "cloud": ["cloud"],
+    "takeover_plus": ["dns_plane", "vuln"],
+    "osint": ["passive"],
+    "gitrecon": ["surface"],
     "screenshots": ["live_hosts"],
 }
 
@@ -215,6 +141,14 @@ def build_mission(
     suitable for client-side play/pause timeline (HF intrusion replay style).
     """
     records = list(idx.get("findings") or idx.get("records") or [])
+    if not records:
+        try:
+            from findings.indexer import query_store
+            records, _st = query_store(
+                target=target or None, limit=max_actions, offset=0,
+            )
+        except Exception:
+            records = []
     if target:
         t = target.lower().strip()
         records = [r for r in records if str(r.get("target") or "").lower() == t]
@@ -259,7 +193,7 @@ def build_mission(
     for i, r in enumerate(ordered):
         mid = _module_of(r)
         meta = PHASE_BY_ID.get(mid, {
-            "id": mid, "ship": "USS UNKNOWN", "class": "Utility",
+            "id": mid, "ship": mid, "class": "utility",
             "role": mid, "stage": 0, "color": "#64748b",
         })
         # Spread timestamps by ~30s for replay pacing
@@ -312,7 +246,7 @@ def build_mission(
         b = min(bucket_n - 1, int(a["i"] * bucket_n / n_act))
         volumes[b] += 1
 
-    # Fleet board: every ship status + ASCII hull art for the bridge UI
+    # Module board
     try:
         from shell.fleet_art import (
             MODULE_SHIP_ART,
@@ -334,7 +268,7 @@ def build_mission(
         fleet.append({
             **p,
             "signals": c,
-            "status": "engaged" if c > 0 else "docked",
+            "status": "active" if c > 0 else "idle",
             "orders": p["role"],
             "art": art_lines,
         })
@@ -344,17 +278,17 @@ def build_mission(
     high = sum(1 for r in records if str(r.get("severity")).lower() == "high")
     notable = sum(1 for r in records if r.get("notable"))
     if crit:
-        blast = "red-alert"
-        blast_detail = f"{crit} critical signal(s) — priority triage"
+        blast = "critical"
+        blast_detail = f"{crit} critical record(s) — triage first"
     elif high:
-        blast = "yellow-alert"
-        blast_detail = f"{high} high signal(s) — elevated watch"
+        blast = "high"
+        blast_detail = f"{high} high-severity record(s)"
     elif notable:
-        blast = "condition-blue"
+        blast = "notable"
         blast_detail = f"{notable} notable finding(s)"
     else:
-        blast = "green"
-        blast_detail = "nominal — detection sweep only"
+        blast = "info"
+        blast_detail = "inventory / detection only"
 
     # Proofs
     proof_n = 0
@@ -368,11 +302,11 @@ def build_mission(
     active_phases = sum(1 for p in phase_activity if p["count"] > 0)
     stages_seen = sorted({p["stage"] for p in phase_activity if p["count"] > 0 and p.get("stage")})
 
-    tgt_label = target or "FLEET-WIDE"
+    tgt_label = target or "all targets"
     return {
         "version": "3.0.0",
-        "mission_id": f"MISSION-{tgt_label.upper().replace('.', '-')}",
-        "codename": "STARFLEET RECON OPS",
+        "mission_id": f"SCAN-{tgt_label.upper().replace('.', '-')}",
+        "codename": "RECON PIPELINE",
         "target": target or "",
         "target_label": tgt_label,
         "generated_at": idx.get("generated_at"),
@@ -400,8 +334,8 @@ def build_mission(
             "wordmark": RECONKIT_WORDMARK,
             "flagship": FLAGSHIP,
             "spacedock": SPACEDOCK,
-            "source": "pure-ascii RECONKIT + asciiart.eu ships/dock",
-            "ships_source": "asciiart.eu/television/star-trek",
+            "source": "RECONKIT",
+            "ships_source": "module labels",
         },
         "actions": actions,
         "volumes": [
@@ -427,7 +361,7 @@ def build_live_tracker(
     target: str = "",
 ) -> dict[str, Any]:
     """
-    Live phase tracker for the bridge UI (no replay).
+    Live phase tracker for the dashboard (no replay).
 
     Merges disk-backed live_mission.json (current run) with findings counts
     so tiles show: pending / running / complete / idle.
@@ -437,6 +371,12 @@ def build_live_tracker(
     live = read_live()
     records = list(idx.get("findings") or idx.get("records") or [])
     tgt_filter = (target or live.get("target") or "").strip()
+    if not records:
+        try:
+            from findings.indexer import query_store
+            records, _st = query_store(target=tgt_filter or None, limit=2000, offset=0)
+        except Exception:
+            records = []
     if tgt_filter:
         tlow = tgt_filter.lower()
         records = [r for r in records if str(r.get("target") or "").lower() == tlow]
@@ -537,10 +477,10 @@ def build_live_tracker(
     return {
         "version": "3.0.0",
         "mode": "live_tracker",
-        "mission_id": f"LIVE-{(tgt_filter or 'FLEET').upper().replace('.', '-')}",
-        "codename": "LIVE PHASE TRACKER",
+        "mission_id": f"LIVE-{(tgt_filter or 'ALL').upper().replace('.', '-')}",
+        "codename": "LIVE SCAN",
         "target": tgt_filter,
-        "target_label": tgt_filter or "FLEET-WIDE",
+        "target_label": tgt_filter or "all targets",
         "live": live,
         "active": active,
         "status": status,
@@ -584,7 +524,7 @@ def build_live_tracker(
                 **PHASE_BY_ID[t["id"]],
                 "signals": t["signals"],
                 "status": (
-                    "engaged" if t["status"] in ("running", "complete") else "docked"
+                    "active" if t["status"] in ("running", "complete") else "idle"
                 ),
                 "orders": t.get("orders") or "",
             }

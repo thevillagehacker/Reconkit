@@ -48,46 +48,66 @@ _ANIM_BLOCKS = list("█▓▒░▒▓▉▊▋▌▍▎▏▎▍▌▋▊▉")
 _THINK_DOTS = ["   ", ".  ", ".. ", "...", ".. ", ".  "]
 _VERBS = ("Thinking", "Scanning", "Working", "Probing", "Resolving", "Harvesting")
 
-# Prefer single-codepoint symbols (Starfleet-friendly, Linux-terminal safe).
 PHASE_EMOJI = {
-    "pipeline": "▶", "subdomains": "◆", "dns": "◇", "httpprobe": "●",
-    "tls": "▣", "crawl": "◎", "js": "◈", "params": "◇", "content": "▤",
-    "xss": "✦", "sqli": "▦", "ssrf_ssti": "◉", "nuclei": "▲",
-    "cloud": "○", "screenshots": "□", "default": "•", "done": "✔",
+    "pipeline": "▶", "subdomains": "◆", "permute": "✧", "dns": "◇",
+    "ports": "▣", "httpprobe": "●", "tls": "▣", "wellknown": "▤",
+    "crawl": "◎", "js": "◈", "jsintel": "◈", "params": "◇",
+    "apis": "⬢", "content": "▤", "bypass403": "▸", "gfextra": "◇",
+    "xss": "✦", "sqli": "▦", "ssrf_ssti": "◉", "redirect": "↪",
+    "cors": "◌", "graphql": "⬡", "nuclei": "▲",
+    "cloud": "○", "takeover_plus": "⚠", "osint": "◎", "gitrecon": "⌥",
+    "screenshots": "□", "default": "•", "done": "✔",
     "fail": "✘", "warn": "!",
 }
 PHASE_TITLE = {
-    "subdomains": "PATHFINDER DEPLOY", "dns": "NAVIGATOR CHART",
-    "httpprobe": "SENSOR SWEEP", "tls": "CIPHER ANALYSIS",
-    "crawl": "SPIDER SURFACE MAP", "js": "ARCHIVE EXTRACT",
-    "params": "KEYMASTER CHANNELS", "content": "DIG EXCAVATION",
-    "xss": "MIRROR HAZARD", "sqli": "ORACLE CANARIES",
-    "ssrf_ssti": "WORMHOLE PROBES", "nuclei": "STRIKE VOLLEY",
-    "cloud": "NEBULA SURVEY", "screenshots": "VIEWSCREEN CAPTURE",
-    "pipeline": "FLEET MISSION", "default": "MISSION PHASE",
+    "subdomains": "SUBDOMAIN ENUM", "permute": "DNS PERMUTE",
+    "dns": "DNS RECORDS", "ports": "PORT PROBE",
+    "httpprobe": "HTTP PROBE", "tls": "TLS FINGERPRINT",
+    "wellknown": "WELL-KNOWN", "crawl": "URL CRAWL", "js": "JAVASCRIPT",
+    "jsintel": "JS INTEL", "params": "PARAMETERS", "apis": "API SURFACE",
+    "content": "CONTENT DISCOVERY", "bypass403": "403 BYPASS",
+    "gfextra": "GF EXTRAS", "xss": "XSS CANARIES", "sqli": "SQLI CANARIES",
+    "ssrf_ssti": "SSRF / SSTI", "redirect": "OPEN REDIRECT",
+    "cors": "CORS", "graphql": "GRAPHQL", "nuclei": "NUCLEI",
+    "cloud": "CLOUD ASSETS", "takeover_plus": "TAKEOVER+",
+    "osint": "SCOPED OSINT", "gitrecon": "GIT RECON",
+    "screenshots": "SCREENSHOTS",
+    "pipeline": "RECON PIPELINE", "default": "PHASE",
 }
 
-# Module → starship (canon names from shell.fleet_art — asciiart.eu classes)
 try:
     from shell.fleet_art import MODULE_SHIP_META as _SHIP_META, ship_lines as _ship_lines
 except Exception:  # pragma: no cover
     _SHIP_META = {
-        "subdomains": ("NODE PATHFINDER", "Scout"),
-        "dns": ("NODE NAVIGATOR", "Science"),
-        "httpprobe": ("NODE SENSOR", "Probe"),
-        "tls": ("NODE CIPHER", "Escort"),
-        "crawl": ("NODE SPIDER", "Explorer"),
-        "js": ("NODE ARCHIVE", "Intel"),
-        "params": ("NODE KEYMASTER", "Ops"),
-        "content": ("NODE DIG", "Survey"),
-        "xss": ("NODE MIRROR", "Tactical"),
-        "sqli": ("NODE ORACLE", "Tactical"),
-        "ssrf_ssti": ("NODE WORMHOLE", "Tactical"),
-        "nuclei": ("NODE STRIKE", "Battleship"),
-        "cloud": ("NODE NEBULA", "Explorer"),
-        "screenshots": ("NODE VIEWSCREEN", "Support"),
-        "pipeline": ("OPS COMMAND", "Flag"),
-        "default": ("NODE RECON", "Utility"),
+        "subdomains": ("Subdomain enum", "passive"),
+        "permute": ("DNS permutations", "passive"),
+        "dns": ("DNS records", "passive"),
+        "ports": ("Port probe", "active"),
+        "httpprobe": ("HTTP probe", "active"),
+        "tls": ("TLS fingerprint", "active"),
+        "wellknown": ("Well-known paths", "discovery"),
+        "crawl": ("URL crawl", "discovery"),
+        "js": ("JavaScript", "discovery"),
+        "jsintel": ("JS intel", "discovery"),
+        "params": ("Parameters", "discovery"),
+        "apis": ("API surface", "discovery"),
+        "content": ("Content discovery", "discovery"),
+        "bypass403": ("403 bypass", "detection"),
+        "gfextra": ("gf extras", "discovery"),
+        "xss": ("XSS canaries", "detection"),
+        "sqli": ("SQLi canaries", "detection"),
+        "ssrf_ssti": ("SSRF / SSTI", "detection"),
+        "redirect": ("Open redirect", "detection"),
+        "cors": ("CORS", "detection"),
+        "graphql": ("GraphQL", "detection"),
+        "nuclei": ("Nuclei templates", "detection"),
+        "cloud": ("Cloud assets", "detection"),
+        "takeover_plus": ("Takeover extras", "detection"),
+        "osint": ("Scoped OSINT", "passive"),
+        "gitrecon": ("Git recon", "passive"),
+        "screenshots": ("Screenshots", "visual"),
+        "pipeline": ("Pipeline", "control"),
+        "default": ("Recon", "utility"),
     }
 
     def _ship_lines(module: str) -> list[str]:
@@ -101,7 +121,7 @@ SHIP_ART: dict[str, tuple[str, ...]] = {
     k: tuple(_ship_lines(k)) for k in list(FLEET_SHIPS.keys())
 }
 
-# ANSI accent per module (rotating LCARS hues)
+# ANSI accent per module
 _SHIP_COLORS: dict[str, str] = {
     "subdomains": "\033[38;5;80m",
     "dns": "\033[38;5;117m",
@@ -123,7 +143,7 @@ _SHIP_COLORS: dict[str, str] = {
 
 
 def fleet_ship_art(phase: str) -> tuple[str, ...]:
-    """Multi-line pure-ASCII hull for this module (asciiart.eu)."""
+    """Optional ASCII art for a module (usually empty)."""
     key = (phase or "default").lower().strip()
     return tuple(_ship_lines(key))
 
@@ -134,7 +154,7 @@ def fleet_ship_color(phase: str) -> str:
 
 
 def fleet_ship_line(phase: str, detail: str = "") -> str:
-    """One quiet deploy line for pipeline stages (Starfleet)."""
+    """One-line phase header for pipeline stages."""
     key = (phase or "default").lower().strip()
     ship, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
     title = PHASE_TITLE.get(key, key.upper())
@@ -1453,13 +1473,13 @@ def _box_inner_pad(text: str, inner_width: int) -> str:
 
 
 def _print_ops_banner(target: str, modules: list[str]) -> None:
-    """Starfleet mission box — aligned borders, colorized fleet route."""
+    """Pipeline start box — aligned borders, module route."""
     width = 72
     inner = width - 2
     total = len(modules)
     tgt = target or "target"
     phases_s = f"{total} SHIP{'S' if total != 1 else ''}"
-    prefix = "  ▶  FLEET MISSION  ·  "
+    prefix = "  ▶  RECON  ·  "
     mid = "  ·  "
     room = inner - len(prefix) - len(mid) - len(phases_s)
     if room < 8:
@@ -1487,7 +1507,7 @@ def _print_ops_banner(target: str, modules: list[str]) -> None:
         )
         print(_c(_BOLD, _YELLOW) + "╚" + "═" * inner + "╝" + _R)
         arrow = f"{_GRAY} → {_R}"
-        print(f"{_GRAY}  fleet: {_R}" + arrow.join(fleet_bits_color))
+        print(f"{_GRAY}  modules: {_R}" + arrow.join(fleet_bits_color))
         print(_c(_GRAY) + "  orders: /pause  /resume  /stop  ·  /jobs  ·  /dashboard" + _R)
         print()
     else:
@@ -1495,7 +1515,7 @@ def _print_ops_banner(target: str, modules: list[str]) -> None:
         print("+" + "-" * inner + "+")
         print("|" + title + "|")
         print("+" + "-" * inner + "+")
-        print("  fleet: " + " → ".join(fleet_bits_plain))
+        print("  modules: " + " → ".join(fleet_bits_plain))
         print("  orders: /pause  /resume  /stop  ·  /jobs")
         print()
 
@@ -1648,13 +1668,13 @@ class PipelineProgress:
         with _IO:
             if _color_on():
                 print(
-                    f"  {_BOLD}{_GREEN}✔{_R}  {bar}  {_BOLD}MISSION COMPLETE{_R}  "
-                    f"{len(self.modules)} ships  {_GRAY}{_fmt_elapsed(elapsed)}{_R}"
+                    f"  {_BOLD}{_GREEN}✔{_R}  {bar}  {_BOLD}SCAN COMPLETE{_R}  "
+                    f"{len(self.modules)} modules  {_GRAY}{_fmt_elapsed(elapsed)}{_R}"
                     + (f"  {_DIM}{_GRAY}→ {outdir}{_R}" if outdir else "")
                 )
             else:
                 print(
-                    f"  ✔  {bar}  MISSION COMPLETE  {len(self.modules)} ships  "
+                    f"  ✔  {bar}  SCAN COMPLETE  {len(self.modules)} modules  "
                     f"{_fmt_elapsed(elapsed)}"
                     + (f"  → {outdir}" if outdir else "")
                 )

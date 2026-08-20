@@ -25,14 +25,27 @@ v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph**, **d
 | Heuristic pre-eval `agents/eval.py` (C0–C4) | âœ… |
 | Exhaustive docs: OPERATIONS / WORKFLOW / USAGE / skills | âœ… |
 
+## Done in hunter extras
+
+See **[HUNTER.md](HUNTER.md)**.
+
+| Item | Status |
+|------|--------|
+| Auth session (`/session`, cookie A/B, httpx/prove headers) | ✅ |
+| Multi-scope `--scope-all` | ✅ |
+| JS intel / API harvest / 403 bypass / takeover+ | ✅ |
+| Ports (naabu) / permute / well-known / gf extras | ✅ |
+| Scoped OSINT + git/trufflehog | ✅ |
+| CORS / JWT / GraphQL / redirect / IDOR prove | ✅ |
+| HAR import, evidence ZIP, target wordlist, `--resume` | ✅ |
+| Hunter inbox (`/inbox` · dashboard **INBOX** · `/api/inbox`) | ✅ |
+| SQLite findings query path (`findings/db.py`) | ✅ |
+
 ## Still open (future)
 
-- Auth session / authz diff harness  
 - Hypothesis agent + Kanban  
-- Submission evidence vault ZIP  
-- Deeper GraphQL / JWT / HAR interactive packs (beyond mini-skills)  
 - Lab profile (`max_risk_class: intrusive`)  
-- SQLite index for huge corpora  
+- Deeper GraphQL introspection pack (off by default; RoE gated)  
 - Optional `/eval` shell command surface for pre-eval dumps  
 
 ---

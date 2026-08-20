@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .confidence import assign_confidence, merge_proofs_into_findings
 from .history import snapshot_all_from_index
 from .models import SEVERITY_RANK, Finding, TargetSummary
 from .scoring import NOTABLE_THRESHOLD, enrich, sort_key
@@ -22,16 +23,30 @@ from .store import OUTPUT_DIR, load_index, save_index
 # Map known filenames → module
 FILE_MODULE = {
     "subdomains.txt": "subdomains",
+    "permute_resolved.txt": "permute",
+    "resolved.txt": "dns",
     "dns_records.txt": "dns",
     "cname_takeover_candidates.txt": "dns",
+    "ports.txt": "ports",
+    "ports_http.txt": "ports",
     "alive.txt": "httpprobe",
+    "waf_detected.txt": "httpprobe",
     "tls_recon.json": "tls",
+    "wellknown.txt": "wellknown",
     "urls.txt": "crawl",
     "js_urls.txt": "js",
     "js_secrets_and_endpoints.json": "js",
+    "js_intel.json": "jsintel",
     "param_names.txt": "params",
     "arjun_params.txt": "params",
+    "api_urls.txt": "apis",
+    "api_paths.txt": "apis",
+    "idor_candidates.txt": "apis",
     "sensitive_paths_found.txt": "content",
+    "bypass403.txt": "bypass403",
+    "redirect_candidates.txt": "gfextra",
+    "lfi_candidates.txt": "gfextra",
+    "interesting_params.txt": "gfextra",
     "xss_reflected_params.txt": "xss",
     "dalfox_results.txt": "xss",
     "sqli_candidates.txt": "sqli",
@@ -39,8 +54,15 @@ FILE_MODULE = {
     "sqli_boolean_based.txt": "sqli",
     "ssrf_metadata_candidates.txt": "ssrf_ssti",
     "ssti_candidates.txt": "ssrf_ssti",
+    "redirect_hits.txt": "redirect",
+    "cors_candidates.txt": "cors",
+    "graphql_endpoints.txt": "graphql",
     "cloud_assets.json": "cloud",
     "open_s3_buckets.txt": "cloud",
+    "takeover_plus.txt": "takeover_plus",
+    "osint.txt": "osint",
+    "git_urls.txt": "gitrecon",
+    "trufflehog.jsonl": "gitrecon",
     "agent_report.md": "analyst",
     "agent_state.json": "agents",
     "proofs_index.json": "prove",
@@ -193,7 +215,25 @@ def index_target(target: str, output_dir: Path | None = None) -> tuple[TargetSum
                     tags=["screenshot"],
                 ))
             continue
-        if path.name in ("agent_state.json", "agent_report.md", "findings_index.json"):
+        if path.name in (
+            "agent_state.json",
+            "agent_report.md",
+            "findings_index.json",
+            "report_draft.md",
+            "critic_review.md",
+            ".live_mission.json",
+            "live_mission.json",
+            "alive_urls.txt",
+            "wildcard_dns.txt",
+            "wildcard_http_dropped.txt",
+            "resolved.txt",
+            "arjun_input.txt",
+            "permute_raw.txt",
+            "wordlist_target.txt",
+        ):
+            continue
+        rel_posix = rel.replace("\\", "/")
+        if rel_posix.startswith("proofs/") or "/proofs/" in rel_posix:
             continue
         if path.stat().st_size > 8_000_000:
             continue
@@ -220,14 +260,18 @@ def _parse_file(target: str, path: Path, rel: str, module: str) -> list[Finding]
                 if not isinstance(items, (list, set, tuple)):
                     continue
                 sev = SECRET_SEVERITY.get(cat, "medium")
+                # Emails / RFC1918 / graphql paths are reconnaissance context, not secrets.
+                ftype = "other" if cat in ("emails", "internal_ips", "graphql_endpoints") else "secret"
+                if ftype == "other":
+                    sev = "info"
                 for item in list(items)[:2000]:
                     s = str(item)
                     out.append(Finding(
                         id=_fid(target, "secret", cat, s),
                         target=target,
                         module="js",
-                        ftype="secret",
-                        title=f"JS secret/endpoint: {cat}",
+                        ftype=ftype,
+                        title=f"JS secret/endpoint: {cat}" if ftype == "secret" else f"JS extract: {cat}",
                         asset=s[:300],
                         severity=sev,
                         evidence=s[:2000],
@@ -329,6 +373,37 @@ def _parse_file(target: str, path: Path, rel: str, module: str) -> list[Finding]
                 source_file=rel,
                 tags=["tls"],
             ))
+        return out
+
+    if name == "js_intel.json":
+        try:
+            data = json.loads(_read_text(path))
+        except Exception:
+            return out
+        if not isinstance(data, dict):
+            return out
+        mapping = (
+            ("api_paths", "API path from JS", "low", "url"),
+            ("routes", "Hidden route from JS", "low", "url"),
+            ("sourcemaps", "Sourcemap URL", "medium", "other"),
+            ("libraries", "JS library version", "info", "other"),
+            ("github", "GitHub/GitLab URL in JS", "low", "other"),
+        )
+        for key, title, sev, ftype in mapping:
+            for item in list(data.get(key) or [])[:1500]:
+                s = str(item)
+                out.append(Finding(
+                    id=_fid(target, "jsintel", key, s),
+                    target=target,
+                    module="jsintel",
+                    ftype=ftype,
+                    title=title,
+                    asset=s[:300],
+                    severity=sev,
+                    evidence=s[:2000],
+                    source_file=rel,
+                    tags=["jsintel", key],
+                ))
         return out
 
     if name.startswith("ffuf_") and name.endswith(".json"):
@@ -509,6 +584,38 @@ def _parse_file(target: str, path: Path, rel: str, module: str) -> list[Finding]
             ))
         return out
 
+    if name in (
+        "bypass403.txt",
+        "cors_candidates.txt",
+        "redirect_hits.txt",
+        "idor_candidates.txt",
+        "takeover_plus.txt",
+        "graphql_endpoints.txt",
+    ):
+        meta = {
+            "bypass403.txt": ("bypass403", "401/403 bypass candidate", "medium", "vuln"),
+            "cors_candidates.txt": ("cors", "CORS ACAO candidate", "medium", "vuln"),
+            "redirect_hits.txt": ("redirect", "Open-redirect canary hit", "medium", "vuln"),
+            "idor_candidates.txt": ("apis", "IDOR-shaped parameter URL", "medium", "vuln"),
+            "takeover_plus.txt": ("takeover_plus", "Extra takeover candidate", "high", "vuln"),
+            "graphql_endpoints.txt": ("graphql", "GraphQL endpoint", "low", "other"),
+        }
+        mod, title, sev, ftype = meta[name]
+        for ln in lines:
+            out.append(Finding(
+                id=_fid(target, name, ln),
+                target=target,
+                module=mod,
+                ftype=ftype,
+                title=title,
+                asset=ln[:400],
+                severity=sev,
+                evidence=ln[:2000],
+                source_file=rel,
+                tags=[mod],
+            ))
+        return out
+
     if name.startswith("nuclei") and name.endswith(".txt"):
         for ln in lines:
             sev = _severity_for_nuclei_line(ln)
@@ -603,10 +710,12 @@ def index_all_targets(output_dir: Path | None = None, *, persist: bool = True) -
         summaries[t] = summary.to_dict()
         all_findings.extend(findings)
 
-    # Enrich with scores, sort notable/score first
-    dicts = [enrich(f.to_dict()) for f in all_findings]
+    # Enrich with scores + C0–C4 confidence, sort notable/score first
+    dicts = [assign_confidence(enrich(f.to_dict())) for f in all_findings]
+    dicts = merge_proofs_into_findings(dicts)
     dicts.sort(key=sort_key)
     notable_n = sum(1 for d in dicts if d.get("notable"))
+    c1_n = sum(1 for d in dicts if str(d.get("confidence") or "C0") >= "C1")
 
     fp = output_fingerprint(root)
     payload = {
@@ -617,6 +726,7 @@ def index_all_targets(output_dir: Path | None = None, *, persist: bool = True) -
         "finding_count": len(dicts),
         "record_count": len(dicts),
         "notable_count": notable_n,
+        "c1_count": c1_n,
         "notable_threshold": NOTABLE_THRESHOLD,
         "targets": summaries,
         "findings": dicts,
@@ -625,6 +735,11 @@ def index_all_targets(output_dir: Path | None = None, *, persist: bool = True) -
     }
     if persist:
         save_index(payload)
+        try:
+            from .db import replace_index
+            replace_index(payload)
+        except Exception:
+            pass
         try:
             snapshot_all_from_index(payload)
         except Exception:
@@ -646,6 +761,9 @@ def match_finding(
     q: str | None = None,
     notable: bool | None = None,
     min_score: int | None = None,
+    confidence: str | None = None,
+    min_confidence: str | None = None,
+    status: str | None = None,
 ) -> bool:
     """Return True if record matches all provided filters (empty filter = match)."""
     if target and str(d.get("target") or "") != target:
@@ -659,6 +777,18 @@ def match_finding(
     if notable is True and not d.get("notable"):
         return False
     if min_score is not None and int(d.get("score") or 0) < min_score:
+        return False
+    if (confidence or min_confidence or status) and not d.get("confidence"):
+        assign_confidence(d)
+    if confidence and str(d.get("confidence") or "").upper() != confidence.upper():
+        return False
+    if min_confidence:
+        order = {"C0": 0, "C1": 1, "C2": 2, "C3": 3, "C4": 4}
+        have = order.get(str(d.get("confidence") or "C0").upper(), 0)
+        need = order.get(min_confidence.upper(), 0)
+        if have < need:
+            return False
+    if status and str(d.get("status") or "") != status:
         return False
     if q:
         blob = " ".join(
@@ -680,6 +810,9 @@ def filter_findings(
     q: str | None = None,
     notable: bool | None = None,
     min_score: int | None = None,
+    confidence: str | None = None,
+    min_confidence: str | None = None,
+    status: str | None = None,
     limit: int = 500,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -695,6 +828,9 @@ def filter_findings(
             q=q,
             notable=notable,
             min_score=min_score,
+            confidence=confidence,
+            min_confidence=min_confidence,
+            status=status,
         ):
             continue
         rows.append(d)
@@ -716,6 +852,9 @@ def filter_stats(
     q: str | None = None,
     notable: bool | None = None,
     min_score: int | None = None,
+    confidence: str | None = None,
+    min_confidence: str | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     """Counts for the filtered set (for dashboard KPIs while filters are active)."""
     by_sev: dict[str, int] = {}
@@ -734,6 +873,9 @@ def filter_stats(
             q=q,
             notable=notable,
             min_score=min_score,
+            confidence=confidence,
+            min_confidence=min_confidence,
+            status=status,
         ):
             continue
         total += 1
@@ -801,15 +943,78 @@ def get_or_build_index(*, refresh: bool = False) -> dict[str, Any]:
     When refresh=False, still rebuild if the on-disk index is missing/empty
     OR if output fingerprint no longer matches the one stored in the index
     (new scans written while the dashboard was running).
+    Prefers the SQLite store for the header (no giant findings array).
     """
     fp = output_fingerprint()
+    token = str(fp.get("token") or "")
     if not refresh:
+        try:
+            from .db import slim_payload, usable
+            if usable(token):
+                return slim_payload()
+        except Exception:
+            pass
         idx = load_index()
         if (
             idx.get("findings") is not None
             and idx.get("generated_at")
-            and idx.get("output_fingerprint") == fp.get("token")
+            and idx.get("output_fingerprint") == token
         ):
             return idx
         # Stale or missing index — fall through to rebuild
     return index_all_targets(persist=True)
+
+
+def query_store(
+    *,
+    target: str | None = None,
+    module: str | None = None,
+    severity: str | None = None,
+    ftype: str | None = None,
+    q: str | None = None,
+    notable: bool | None = None,
+    min_score: int | None = None,
+    confidence: str | None = None,
+    min_confidence: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Page + stats. SQLite when current; JSON fallback."""
+    fp = str(output_fingerprint().get("token") or "")
+    try:
+        from .db import query_findings, query_stats, usable
+        if usable(fp):
+            rows, total = query_findings(
+                target=target, module=module, severity=severity, ftype=ftype,
+                q=q, notable=notable, min_score=min_score, confidence=confidence,
+                min_confidence=min_confidence, status=status,
+                limit=limit, offset=offset,
+            )
+            stats = query_stats(
+                target=target, module=module, severity=severity, ftype=ftype,
+                q=q, notable=notable, min_score=min_score, confidence=confidence,
+                min_confidence=min_confidence, status=status,
+            )
+            stats["total"] = total
+            stats["backend"] = "sqlite"
+            return rows, stats
+    except Exception:
+        pass
+    idx = get_or_build_index(refresh=False)
+    source = idx.get("findings") or idx.get("records") or []
+    stats = filter_stats(
+        source,
+        target=target, module=module, severity=severity, ftype=ftype,
+        q=q, notable=notable, min_score=min_score, confidence=confidence,
+        min_confidence=min_confidence, status=status,
+    )
+    rows = filter_findings(
+        source,
+        target=target, module=module, severity=severity, ftype=ftype,
+        q=q, notable=notable, min_score=min_score, confidence=confidence,
+        min_confidence=min_confidence, status=status,
+        limit=limit, offset=offset,
+    )
+    stats["backend"] = "json"
+    return rows, stats

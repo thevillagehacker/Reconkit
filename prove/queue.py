@@ -15,26 +15,37 @@ def _map_technique(finding: dict[str, Any]) -> str | None:
     mod = str(finding.get("module") or "").lower()
     ftype = str(finding.get("ftype") or "").lower()
     title = str(finding.get("title") or "").lower()
-    tags = " ".join(str(t) for t in (finding.get("tags") or [])).lower()
-    blob = f"{mod} {ftype} {title} {tags} {finding.get('asset', '')}".lower()
+    source = str(finding.get("source_file") or "").lower()
+    # Ignore the combined module name `ssrf_ssti` — it contains both tokens.
+    blob = f"{ftype} {title} {source} {finding.get('asset', '')}".lower()
 
-    if mod == "xss" or "xss" in tags or "dalfox" in blob or "reflected" in title:
+    if mod == "xss" or "xss" in title or "dalfox" in blob or "xss" in source:
         return "xss_reflect"
-    if mod == "ssrf_ssti" or "ssti" in blob:
-        if "ssrf" in blob and "ssti" not in title and "ssti" not in tags:
-            return "ssrf_canary_review"
+    if "ssti" in source or "ssti" in title:
         return "ssti_math"
-    if mod == "ssrf_ssti" or "ssrf" in blob:
+    if "ssrf" in source or "ssrf" in title or mod == "ssrf_ssti":
         return "ssrf_canary_review"
-    if mod == "nuclei" or ftype == "vuln" and "cve" in blob or "nuclei" in blob:
+    if mod == "nuclei" or "nuclei" in source or (ftype == "vuln" and "cve" in blob):
         return "nuclei_recheck"
     if mod == "dns" and ("takeover" in blob or "cname" in blob):
         return "takeover_fingerprint"
-    if "takeover" in blob:
+    if "takeover" in title:
         return "takeover_fingerprint"
     # sqli: only queued when policy allows boolean canary (checked at run time too)
-    if mod == "sqli" or "sqli" in blob:
+    if mod == "sqli" or "sqli" in title or "sqli" in source:
         return "sqli_boolean"
+    if mod == "jwt" or "jwt" in title or "jwt" in source:
+        return "jwt_inspect"
+    if mod == "cors" or "cors" in title or "cors" in source:
+        return "cors_origin"
+    if mod == "graphql" or "graphql" in title or "graphql" in source:
+        return "graphql_typename"
+    if mod == "redirect" or "redirect" in title or "redirect" in source:
+        return "redirect_canary"
+    if mod in ("apis", "idor") or "idor" in title or "idor" in source:
+        return "idor_session_diff"
+    if "takeover" in source or mod == "takeover_plus":
+        return "takeover_fingerprint"
     return None
 
 
@@ -57,17 +68,27 @@ def build_queue(
         allowed &= set(techniques)
     max_n = limit if limit is not None else int(pol.get("max_per_run") or 40)
 
-    payload = load_index()
-    findings = list(payload.get("findings") or [])
-    if target:
-        t = target.strip()
-        findings = [f for f in findings if f.get("target") == t]
-
-    if notable_only:
-        findings = [f for f in findings if is_notable(f, threshold)]
-
-    # sort by score desc
-    findings.sort(key=lambda f: (-int(f.get("score") or 0), f.get("severity") or ""))
+    findings: list[dict[str, Any]] = []
+    try:
+        from findings.indexer import query_store
+        findings, _st = query_store(
+            target=(target.strip() if target else None),
+            notable=True if notable_only else None,
+            min_confidence="C1",
+            limit=max(max_n * 8, 80),
+            offset=0,
+        )
+    except Exception:
+        findings = []
+    if not findings:
+        payload = load_index()
+        findings = list(payload.get("findings") or [])
+        if target:
+            t = target.strip()
+            findings = [f for f in findings if f.get("target") == t]
+        if notable_only:
+            findings = [f for f in findings if is_notable(f, threshold)]
+        findings.sort(key=lambda f: (-int(f.get("score") or 0), f.get("severity") or ""))
 
     queue: list[dict[str, Any]] = []
     for f in findings:
@@ -83,6 +104,8 @@ def build_queue(
                 "module": f.get("module"),
                 "severity": f.get("severity"),
                 "score": f.get("score"),
+                "confidence": f.get("confidence"),
+                "status": f.get("status"),
                 "source_file": f.get("source_file"),
                 "evidence": (f.get("evidence") or "")[:400],
                 "finding": f,
@@ -99,6 +122,8 @@ def build_queue(
                 "module": f.get("module"),
                 "severity": f.get("severity"),
                 "score": f.get("score"),
+                "confidence": f.get("confidence"),
+                "status": f.get("status"),
                 "source_file": f.get("source_file"),
                 "evidence": (f.get("evidence") or "")[:400],
                 "finding": f,
@@ -120,8 +145,9 @@ def queue_summary(items: list[dict[str, Any]]) -> str:
     ]
     for i, it in enumerate(items[:15], 1):
         lines.append(
-            f"  {i:2}. [{it.get('score', '?')}] {it.get('technique')}  "
-            f"{(it.get('title') or '')[:40]}  {(it.get('asset') or '')[:50]}"
+            f"  {i:2}. [{it.get('score', '?')}] {it.get('confidence') or ''} "
+            f"{it.get('technique')} → {(it.get('title') or '')[:36]}  "
+            f"{(it.get('asset') or '')[:44]}"
         )
     if len(items) > 15:
         lines.append(f"  … +{len(items) - 15} more")

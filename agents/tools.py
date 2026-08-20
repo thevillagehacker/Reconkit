@@ -62,20 +62,41 @@ def _stage_runners(rk, target: str, outdir: Path) -> dict[str, Callable[[], Any]
             urls.write_text("", encoding="utf-8")
         return urls
 
+    from hunter import stages as H
+
+    js_file = outdir / "js_urls.txt"
+
     return {
         "subdomains": lambda: rk.stage_subdomains(target, outdir),
+        "permute": lambda: H.stage_permute(target, outdir),
         "dns": lambda: rk.stage_dns(target, outdir, ensure_subs()),
-        "httpprobe": lambda: rk.stage_httpprobe(ensure_subs(), outdir),
+        "ports": lambda: H.stage_ports(target, outdir),
+        "httpprobe": lambda: rk.stage_httpprobe(
+            (outdir / "resolved.txt") if (outdir / "resolved.txt").exists()
+            and (outdir / "resolved.txt").stat().st_size else ensure_subs(),
+            outdir,
+        ),
         "tls": lambda: rk.stage_tls(ensure_alive(), outdir),
+        "wellknown": lambda: H.stage_wellknown(target, outdir, ensure_alive()),
         "crawl": lambda: rk.stage_crawl(ensure_alive(), outdir),
         "js": lambda: rk.stage_js(ensure_urls(), outdir),
+        "jsintel": lambda: H.stage_jsintel(target, outdir, js_file),
         "params": lambda: rk.stage_params(ensure_urls(), outdir),
+        "apis": lambda: H.stage_apis(target, outdir, ensure_urls()),
         "content": lambda: rk.stage_content_discovery(ensure_alive(), outdir, wordlist),
+        "bypass403": lambda: H.stage_bypass403(target, outdir, ensure_alive()),
+        "gfextra": lambda: H.stage_gfextra(target, outdir, ensure_urls()),
         "xss": lambda: rk.stage_xss(ensure_urls(), outdir),
         "sqli": lambda: rk.stage_sqli(ensure_urls(), outdir),
         "ssrf_ssti": lambda: rk.stage_ssrf_ssti(ensure_urls(), outdir),
+        "redirect": lambda: H.stage_redirect(target, outdir),
+        "cors": lambda: H.stage_cors(target, outdir, ensure_alive()),
+        "graphql": lambda: H.stage_graphql(target, outdir, ensure_urls()),
         "nuclei": lambda: rk.stage_nuclei(ensure_alive(), ensure_subs(), outdir),
         "cloud": lambda: rk.stage_cloud(ensure_urls(), outdir),
+        "takeover_plus": lambda: H.stage_takeover_plus(target, outdir, ensure_urls()),
+        "osint": lambda: H.stage_osint(target, outdir),
+        "gitrecon": lambda: H.stage_gitrecon(target, outdir),
         "screenshots": lambda: rk.stage_screenshots(ensure_alive(), outdir),
     }
 
@@ -119,7 +140,13 @@ def run_module(module: str, target: str, outdir: Path) -> dict[str, Any]:
         }
 
     runners = _stage_runners(rk, target, outdir)
-    runner = runners[module]
+    runner = runners.get(module)
+    if runner is None:
+        return {
+            "module": module,
+            "success": False,
+            "error": f"No stage runner for '{module}'",
+        }
 
     try:
         result = rk.run_stage(module, outdir, runner)

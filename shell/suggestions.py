@@ -200,6 +200,12 @@ def _catalogs() -> dict[str, dict[str, tuple]]:
             "--modules": (mods, True, mmeta),
             "-m": (mods, True, mmeta),
         },
+        "session": {
+            "--cookie": (lambda: [], False, None),
+            "--cookie-b": (lambda: [], False, None),
+            "--header": (lambda: [], False, None),
+            "--header-b": (lambda: [], False, None),
+        },
         "agent": {
             "--modules": (mods, True, mmeta),
             "-m": (mods, True, mmeta),
@@ -227,6 +233,14 @@ def _catalogs() -> dict[str, dict[str, tuple]]:
         },
         "notable": {
             "--limit": (lambda: ["10", "20", "30", "50", "100"], False, None),
+        },
+        "findings": {
+            "--min-confidence": (lambda: ["C0", "C1", "C2", "C3"], False, lambda n: "min tier"),
+            "--confidence": (lambda: ["C0", "C1", "C2", "all"], False, None),
+            "--limit": (lambda: ["10", "25", "50", "100"], False, None),
+        },
+        "eval": {
+            "--limit": (lambda: ["10", "15", "20", "30"], False, None),
         },
         "prove": {
             "--technique": (prove_techniques, False, lambda n: "safe validator"),
@@ -279,9 +293,11 @@ _BOOL_FLAGS: dict[str, list[str]] = {
     "run": ["--bg", "--background", "--fg", "--foreground"],
     "agent": ["--dry-run", "--approve", "--skip-analyst"],
     "config": ["--force", "--repo", "--json"],
-    "dashboard": ["--no-browser"],
+    "dashboard": ["--no-browser", "--bg", "--background"],
     "report": ["--all"],
     "prove": ["--all", "--dry-run"],
+    "findings": ["--all"],
+    "eval": ["--llm"],
 }
 
 
@@ -317,7 +333,7 @@ def _sub_list(cmd_name: str) -> list[str]:
         if s.startswith("-"):
             continue
         # "all" on /run is a module value, not a subcommand
-        if cmd_name == "run" and s in ("all", "--modules", "--bg", "--fg"):
+        if cmd_name == "run" and s in ("all", "--modules", "--bg", "--fg", "--resume", "--force", "--scope-all"):
             continue
         if s not in out:
             out.append(s)

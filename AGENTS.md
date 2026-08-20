@@ -1,8 +1,8 @@
 ﻿# Agents, prove, programs, graph & skills â€” v3.0.0
 
-**Starfleet Bridge console** (new in 3.0.0): mission-phase replay dashboard â€”
-modules deploy as starships; HF-style play/pause timeline, phase activity,
-trust-boundary chain map, live action stream, fleet board.
+**Dashboard** (v3.0.0): scan-phase tracker, findings, proofs, attack-path graph,
+and insights. CLI remains the engine; the UI is a local viewer and optional
+scan control panel.
 
 ## Read these first
 
@@ -13,7 +13,8 @@ trust-boundary chain map, live action stream, fleet board.
 | **[USAGE.md](USAGE.md)** | Architecture, configs, troubleshooting |
 | **[skills/README.md](skills/README.md)** | Skill suite design |
 | **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** | C0–C4 + mini-skill triggers |
-| **[ROADMAP.md](ROADMAP.md)** | Whatâ€™s done vs planned |
+| **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
+| **[ROADMAP.md](ROADMAP.md)** | What's done vs planned |
 
 ## Quick launch
 
@@ -27,9 +28,10 @@ python recon_shell.py
 
 python reconkit.py --version
 python recon_dashboard.py
-# Bridge tabs: MISSION | SENSORS | PROOF LOCKER | TACTICAL MAP | SCIENCE
-# Mission view: play/pause recon phases as fleet deployment (Star Trek console)
-# API: GET /api/mission?target=example.com
+# Tabs: SCAN | FINDINGS | INBOX | PROOFS | GRAPH | INSIGHTS
+# Default bind: 127.0.0.1:8787  (use --host 0.0.0.0 from a VM)
+# API: GET /api/scan?target=example.com
+# Inbox: GET /api/inbox?target=example.com
 ```
 
 ## Shell map (high level)
@@ -38,6 +40,8 @@ python recon_dashboard.py
 /setup /verify /wordlists
 /scope add|list|check
 /keys set|list|remove
+/session show|set|clear
+/har import  /inbox  /evidence  /wordlist-target
 /target /verbose /rate
 /run /quick /full /scan /playbook   # /run is BACKGROUND by default; --fg to block
 /pause /resume /stop /jobs
@@ -73,6 +77,8 @@ Files: `config/programs/*.json` Â· env: `RECON_PROGRAM=…`
 /prove run example.com --dry-run
 /prove run example.com
 /prove run example.com --technique xss_reflect
+/prove run example.com --technique cors_origin
+/prove run example.com --technique idor_session_diff   # needs /session cookie-A and cookie-B
 ```
 
 ```bash

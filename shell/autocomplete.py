@@ -153,7 +153,7 @@ def make_prompt_toolkit_session():
         text = _buffer_text()
         if not text.startswith("/"):
             return FormattedText([
-                ("class:bottom-toolbar", "  STARFLEET BRIDGE  ·  type / for orders  ·  Tab complete  ·  /dashboard for viewscreen  "),
+                ("class:bottom-toolbar", "  reconkit  ·  type / for commands  ·  Tab complete  ·  /dashboard  "),
             ])
         sugg = suggestions_for(text)
         if not sugg:
@@ -166,7 +166,7 @@ def make_prompt_toolkit_session():
             ("class:bottom-toolbar", f"  {names}{extra}  │ Tab · Enter  "),
         ])
 
-    # Starfleet / LCARS palette (amber + teal bridge)
+    # Console palette
     style = Style.from_dict({
         "completion-menu": "bg:#0a1220 #e8eef7",
         "completion-menu.completion": "bg:#0a1220 #e8eef7",
@@ -178,7 +178,7 @@ def make_prompt_toolkit_session():
         "bottom-toolbar": "noreverse bg:#0a1220 #f5a623",
         "rk": "#5eead4 bold",          # BRIDGE cyan
         "at": "#8b9bb4",
-        "ver": "#fbbf24",              # LCARS amber version
+        "ver": "#fbbf24",
         "dim": "#64748b",
         "tgt-on": "#34d399 bold",      # green sector
         "tgt-off": "#f5a623 bold",     # amber when no target
@@ -376,7 +376,7 @@ def notify_job_finished(job: Any) -> None:
                 if status == "failed" and err:
                     first = err.strip().splitlines()[0][:120]
                     print(f"  → {first}")
-                print("  bridge ready  ·  type / for orders  ·  /dashboard viewscreen")
+                print("  ready  ·  type / for commands  ·  /dashboard")
                 sys.stdout.flush()
             except Exception:
                 pass

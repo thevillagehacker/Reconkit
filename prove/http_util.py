@@ -46,10 +46,12 @@ def http_get(
     timeout: float = 15.0,
     user_agent: str = "reconkit-prove/3.0.0",
     max_bytes: int = 200_000,
+    extra_headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     GET url; return status, body snippet, headers summary, error.
     TLS verification kept on; no redirects to other hosts beyond urllib default.
+    Merges hunter session cookies/headers when present (authenticated recon).
     """
     result: dict[str, Any] = {
         "url": url,
@@ -61,12 +63,24 @@ def http_get(
     if not url.lower().startswith(("http://", "https://")):
         result["error"] = "not an http(s) URL"
         return result
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/json,*/*",
+    }
+    try:
+        from hunter.session import headers as sess_headers
+        for k, v in (sess_headers() or {}).items():
+            if k and v:
+                headers[str(k)] = str(v)
+    except Exception:
+        pass
+    if extra_headers:
+        for k, v in extra_headers.items():
+            if k and v is not None:
+                headers[str(k)] = str(v)
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": user_agent,
-            "Accept": "text/html,application/json,*/*",
-        },
+        headers=headers,
         method="GET",
     )
     ctx = ssl.create_default_context()
@@ -86,3 +100,25 @@ def http_get(
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"
     return result
+
+
+def body_hash(body: str) -> str:
+    import hashlib
+    return hashlib.sha1((body or "").encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def baseline_diff(original: dict[str, Any], probed: dict[str, Any]) -> dict[str, Any]:
+    """Compare a baseline GET vs an injected GET."""
+    ob = original.get("body") or ""
+    pb = probed.get("body") or ""
+    return {
+        "status_orig": original.get("status"),
+        "status_probe": probed.get("status"),
+        "len_orig": len(ob),
+        "len_probe": len(pb),
+        "len_diff": abs(len(ob) - len(pb)),
+        "status_diff": original.get("status") != probed.get("status"),
+        "hash_orig": body_hash(ob),
+        "hash_probe": body_hash(pb),
+        "hash_diff": body_hash(ob) != body_hash(pb),
+    }

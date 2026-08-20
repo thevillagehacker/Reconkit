@@ -12,47 +12,60 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
         "modules": ["subdomains", "dns", "httpprobe"],
     },
     "takeover-first": {
-        "description": "Subdomains + DNS (CNAME takeover candidates) + HTTP",
-        "modules": ["subdomains", "dns", "httpprobe"],
+        "description": "Subdomains + DNS CNAME candidates + extra takeover surface + HTTP",
+        "modules": ["subdomains", "dns", "httpprobe", "takeover_plus"],
     },
     "js-deep": {
-        "description": "Live hosts → crawl → JS secrets/endpoints → params",
-        "modules": ["httpprobe", "crawl", "js", "params"],
+        "description": "Live hosts → crawl → JS secrets + sourcemaps/routes + params",
+        "modules": ["httpprobe", "crawl", "js", "jsintel", "params"],
     },
     "api-surface": {
-        "description": "Crawl + params + content + nuclei (API-ish surface)",
-        "modules": ["httpprobe", "crawl", "params", "content", "nuclei"],
+        "description": "API/OpenAPI/GraphQL harvest + IDOR-shaped params + CORS",
+        "modules": ["httpprobe", "crawl", "jsintel", "params", "apis", "graphql", "cors", "nuclei"],
     },
     "vuln-pass": {
-        "description": "Detection pass: xss, sqli, ssrf/ssti, nuclei, cloud",
-        "modules": ["xss", "sqli", "ssrf_ssti", "nuclei", "cloud"],
+        "description": "Detection pass: xss, sqli, ssrf/ssti, redirect, cors, graphql, nuclei, cloud",
+        "modules": ["xss", "sqli", "ssrf_ssti", "redirect", "cors", "graphql", "nuclei", "cloud"],
     },
     "content-light": {
-        "description": "Sensitive paths + light content discovery",
-        "modules": ["httpprobe", "content"],
+        "description": "Well-known paths + sensitive paths + 401/403 header probes",
+        "modules": ["httpprobe", "wellknown", "content", "bypass403"],
     },
     "full": {
         "description": "All reconkit modules",
         "modules": ["all"],
     },
     "passive": {
-        "description": "Lower noise: subdomains, dns, httpprobe, tls, crawl (no fuzz/xss)",
-        "modules": ["subdomains", "dns", "httpprobe", "tls", "crawl"],
+        "description": "Lower noise: subdomains, dns, httpprobe, tls, wellknown, crawl (no fuzz/xss)",
+        "modules": ["subdomains", "dns", "httpprobe", "tls", "wellknown", "crawl"],
     },
     "ports-hint": {
-        "description": (
-            "No dedicated ports module yet — runs discovery set; "
-            "use naabu manually on alive hosts if needed"
-        ),
-        "modules": ["subdomains", "dns", "httpprobe", "tls"],
+        "description": "Subdomains + DNS + in-scope naabu connect-scan + HTTP probe",
+        "modules": ["subdomains", "dns", "ports", "httpprobe", "tls"],
     },
-    # After recon: use /prove (not module list) — documented for hunters
+    "auth-surface": {
+        "description": (
+            "Authenticated recon (set /session first): crawl + JS intel + APIs + 403 bypass. "
+            "Then /prove run --technique idor_session_diff after cookie-B is set."
+        ),
+        "modules": ["httpprobe", "crawl", "js", "jsintel", "apis", "bypass403"],
+    },
+    "hunter": {
+        "description": "Hunter extras: permute, ports, well-known, JS intel, APIs, 403, gf extras, takeover+",
+        "modules": [
+            "permute", "ports", "wellknown", "jsintel", "apis",
+            "bypass403", "gfextra", "redirect", "cors", "graphql", "takeover_plus",
+        ],
+    },
     "prove-prep": {
         "description": (
-            "Detection surface for later /prove: crawl + xss + sqli + ssrf_ssti + nuclei + cloud. "
-            "Then: /findings reindex && /prove queue && /prove run"
+            "Detection surface for later /prove: crawl + xss + sqli + ssrf_ssti + "
+            "redirect/cors/graphql + nuclei + cloud. Then: /findings reindex && /prove queue && /prove run"
         ),
-        "modules": ["httpprobe", "crawl", "xss", "sqli", "ssrf_ssti", "nuclei", "cloud"],
+        "modules": [
+            "httpprobe", "crawl", "xss", "sqli", "ssrf_ssti",
+            "redirect", "cors", "graphql", "nuclei", "cloud",
+        ],
     },
 }
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from . import nuclei, sqli_boolean, ssrf_review, ssti, takeover, xss
+from . import cors, graphql, idor, jwt, nuclei, redirect, sqli_boolean, ssrf_review, ssti, takeover, xss
 
 ValidatorFn = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
@@ -15,6 +15,11 @@ REGISTRY: dict[str, ValidatorFn] = {
     "takeover_fingerprint": takeover.validate,
     "ssrf_canary_review": ssrf_review.validate,
     "sqli_boolean": sqli_boolean.validate,
+    "jwt_inspect": jwt.validate,
+    "cors_origin": cors.validate,
+    "graphql_typename": graphql.validate,
+    "redirect_canary": redirect.validate,
+    "idor_session_diff": idor.validate,
 }
 
 

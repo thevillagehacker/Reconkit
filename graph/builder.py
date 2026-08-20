@@ -61,15 +61,23 @@ def build_graph(
     """
     Return {nodes: [...], edges: [...], stats: {...}} for dashboard / API.
     """
-    idx = load_index()
-    findings = list(idx.get("findings") or [])
-    if target:
-        findings = [f for f in findings if f.get("target") == target]
-
-    # Prefer higher score / notable
-    findings.sort(key=lambda f: (-int(f.get("score") or 0), f.get("severity") or ""))
-    if min_score:
-        findings = [f for f in findings if int(f.get("score") or 0) >= min_score]
+    findings: list[dict[str, Any]] = []
+    try:
+        from findings.indexer import query_store
+        findings, _st = query_store(
+            target=target, min_score=min_score or None,
+            limit=max(max_nodes * 6, 400), offset=0,
+        )
+    except Exception:
+        findings = []
+    if not findings:
+        idx = load_index()
+        findings = list(idx.get("findings") or [])
+        if target:
+            findings = [f for f in findings if f.get("target") == target]
+        findings.sort(key=lambda f: (-int(f.get("score") or 0), f.get("severity") or ""))
+        if min_score:
+            findings = [f for f in findings if int(f.get("score") or 0) >= min_score]
 
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []

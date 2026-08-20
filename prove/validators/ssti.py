@@ -1,4 +1,8 @@
-"""Safe SSTI canary: {{7*7}} → look for 49 once. No RCE payloads."""
+"""Safe SSTI canary: {{1337*7}} → look for 9359. No RCE payloads.
+
+Uses a rare product so pages that mention "49" (years, prices, IDs) are not
+auto-confirmed. Matches reconkit.SSTI_CANARY / SSTI_EXPECTED.
+"""
 
 from __future__ import annotations
 
@@ -8,22 +12,14 @@ from urllib.parse import urlparse
 
 from prove.http_util import http_get, inject_query_marker
 
-CANARY = "{{7*7}}"
-EXPECTED = "49"
+CANARY = "{{1337*7}}"
+EXPECTED = "9359"
 
 
 def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     asset = (item.get("asset") or "") + " " + (item.get("evidence") or "")
     url = _extract_url(asset)
     if not url:
-        # evidence-only confirmation from recon already saying 49
-        ev = item.get("evidence") or ""
-        if EXPECTED in ev and ("ssti" in ev.lower() or CANARY in ev):
-            return {
-                "status": "confirmed",
-                "evidence": "Recon evidence already contains SSTI canary hit (49). Manual review recommended.\n" + ev[:500],
-                "impact_note": "Template injection canary observed during recon — validate impact carefully under RoE.",
-            }
         return {
             "status": "needs_manual",
             "evidence": "No URL to re-test; review recon ssti_candidates.txt manually.",
@@ -33,8 +29,19 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     test_url = inject_query_marker(url, CANARY)
     timeout = float(policy.get("request_timeout_sec") or 15)
     ua = str(policy.get("user_agent") or "reconkit-prove/2.1.0")
+    base = http_get(url, timeout=timeout, user_agent=ua)
     resp = http_get(test_url, timeout=timeout, user_agent=ua)
     body = resp.get("body") or ""
+    if EXPECTED in (base.get("body") or ""):
+        return {
+            "status": "false_positive",
+            "evidence": (
+                f"Baseline already contains '{EXPECTED}' without the canary — not SSTI.\n"
+                f"url={url}"
+            ),
+            "impact_note": "",
+            "meta": {"test_url": test_url, "baseline": True},
+        }
     if resp.get("error") and resp.get("status") is None:
         return {
             "status": "error",
@@ -42,7 +49,6 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
             "impact_note": "",
         }
 
-    # Prefer seeing 49 near template-ish context; simple presence is enough for canary
     if EXPECTED in body and CANARY not in body:
         return {
             "status": "confirmed",
@@ -59,7 +65,7 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     if EXPECTED in body and CANARY in body:
         return {
             "status": "needs_manual",
-            "evidence": f"Both canary and 49 present; ambiguous.\nurl={test_url}",
+            "evidence": f"Both canary and {EXPECTED} present; ambiguous.\nurl={test_url}",
             "impact_note": "",
             "meta": {"test_url": test_url},
         }

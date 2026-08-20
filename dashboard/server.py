@@ -23,13 +23,14 @@ API (JSON):
   GET  /api/graph
   GET  /api/stats/charts
   GET  /api/program
-  GET  /api/mission              # live phase tracker (default)
-  GET  /api/mission?mode=replay  # legacy findings replay stream
-  GET  /api/mission/live         # alias of live tracker
-  GET  /api/mission/fleet        # ship board / tiles only
-  GET  /api/fleet/art            # RECONKIT logos + ship hulls
+  GET  /api/scan                 # live phase tracker (alias: /api/mission)
+  GET  /api/scan?mode=replay     # findings replay stream
+  POST /api/run                  # start scoped scan (target, modules)
+  POST /api/control              # pause | resume | stop
+  GET  /api/run                  # scan control status
   POST /api/reindex
   GET  /api/file?target=&path=
+  GET  /api/inbox                # hunter C1+ triage queue
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ from findings.indexer import (  # noqa: E402
     index_all_targets,
     list_targets,
     output_fingerprint,
+    query_store,
 )
 from findings.store import OUTPUT_DIR  # noqa: E402
 
@@ -95,6 +97,15 @@ def _get_index(*, force: bool = False) -> dict[str, Any]:
         if force or str(idx.get("output_fingerprint") or "") != live_fp:
             idx = index_all_targets(persist=True)
         fp = str(idx.get("output_fingerprint") or live_fp)
+        # Do not keep the full findings array in RAM — SQLite is the query path.
+        try:
+            from findings.db import slim_payload, usable
+            if usable(fp):
+                idx = slim_payload()
+        except Exception:
+            idx = dict(idx)
+            idx["findings"] = []
+            idx["records"] = []
         with _LOCK:
             _INDEX = idx
             _INDEX_FP = fp
@@ -113,10 +124,21 @@ def _overview(idx: dict[str, Any]) -> dict[str, Any]:
     by_sev: dict[str, int] = {}
     by_mod: dict[str, int] = {}
     by_type: dict[str, int] = {}
-    for f in records:
-        by_sev[f.get("severity", "unknown")] = by_sev.get(f.get("severity", "unknown"), 0) + 1
-        by_mod[f.get("module", "other")] = by_mod.get(f.get("module", "other"), 0) + 1
-        by_type[f.get("ftype", "other")] = by_type.get(f.get("ftype", "other"), 0) + 1
+    if records:
+        for f in records:
+            by_sev[f.get("severity", "unknown")] = by_sev.get(f.get("severity", "unknown"), 0) + 1
+            by_mod[f.get("module", "other")] = by_mod.get(f.get("module", "other"), 0) + 1
+            by_type[f.get("ftype", "other")] = by_type.get(f.get("ftype", "other"), 0) + 1
+    else:
+        try:
+            from findings.db import query_stats, usable
+            if usable(str(idx.get("output_fingerprint") or "")):
+                st = query_stats()
+                by_sev = st.get("by_severity") or {}
+                by_mod = st.get("by_module") or {}
+                by_type = st.get("by_type") or {}
+        except Exception:
+            pass
     n = idx.get("finding_count", len(records))
     fp = output_fingerprint()
     out: dict[str, Any] = {
@@ -217,6 +239,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "elapsed_s": round(elapsed, 2),
             })
             return
+
+        if path in ("/api/run", "/api/scan/start"):
+            raw = b""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            # body already drained in do_POST — parse query instead if empty
+            qs = parse_qs(urlparse(self.path).query)
+            target = (qs.get("target") or [""])[0]
+            modules = (qs.get("modules") or ["quick"])[0]
+            try:
+                from dashboard.control import start_scan
+                self._send_json(start_scan(target=target, modules=modules, source="dashboard"))
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+            return
+
+        if path in ("/api/control", "/api/scan/control"):
+            qs = parse_qs(urlparse(self.path).query)
+            action = (qs.get("action") or [""])[0].lower()
+            try:
+                from dashboard.control import pause, resume, stop
+                if action == "pause":
+                    self._send_json({"ok": True, **pause()})
+                elif action == "resume":
+                    self._send_json({"ok": True, **resume()})
+                elif action in ("stop", "kill"):
+                    self._send_json({"ok": True, **stop()})
+                else:
+                    self._send_json({"error": "action must be pause|resume|stop"}, 400)
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+            return
         self._send_json({"error": "not found"}, 404)
 
     def _api_get(self, path: str, qs: dict[str, list[str]]) -> None:
@@ -228,16 +284,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "1", "true", "yes",
         )
 
+        if path in ("/api/run", "/api/scan/status"):
+            from dashboard.control import status as run_status
+            self._send_json(run_status())
+            return
+
         if path == "/api/health":
             self._send_json({
                 "ok": True,
                 "service": "reconkit-dashboard",
                 "version": "3.0.0",
-                "codename": "starfleet-bridge",
+                "codename": "recon-dashboard",
             })
             return
 
-        if path in ("/api/mission", "/api/mission/live", "/api/bridge", "/api/tracker"):
+        if path in ("/api/scan", "/api/mission", "/api/mission/live", "/api/tracker", "/api/run/live"):
             # Live phase tracker (default). ?mode=replay keeps legacy action stream.
             idx = _get_index(force=force)
             target = q("target")
@@ -254,7 +315,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(build_live_tracker(idx, target=target))
             return
 
-        if path in ("/api/mission/fleet", "/api/fleet"):
+        if path in ("/api/scan/modules", "/api/mission/fleet", "/api/fleet"):
             idx = _get_index(force=force)
             target = q("target")
             from dashboard.mission import build_live_tracker
@@ -270,8 +331,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             })
             return
 
-        if path in ("/api/fleet/art", "/api/art", "/api/logos"):
-            # Star Trek logo + per-module ship hulls for the bridge UI
+        if path in ("/api/modules/meta", "/api/fleet/art", "/api/art", "/api/logos"):
             try:
                 from shell.fleet_art import (
                     MODULE_SHIP_ART,
@@ -284,6 +344,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     art = MODULE_SHIP_ART.get(mod, "")
                     ships[mod] = {
                         "id": mod,
+                        "label": name,
                         "ship": name,
                         "class": klass,
                         "art": str(art).splitlines() if art else [],
@@ -294,10 +355,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "flagship": "",
                         "spacedock": "",
                     },
+                    "modules": ships,
                     "ships": ships,
                     "source": {
-                        "banner": "RECONKIT cyberwarfare console",
-                        "ships": "module node names",
+                        "banner": "RECONKIT",
+                        "ships": "module names",
                     },
                 })
             except Exception as e:
@@ -358,16 +420,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             fty = q("type") or None
             fq = q("q") or None
             notable = q("notable", "").lower() in ("1", "true", "yes")
+            min_conf = q("min_confidence") or q("min_conf") or ""
+            conf = q("confidence") or ""
             min_score = None
             if q("min_score"):
                 try:
                     min_score = int(q("min_score"))
                 except ValueError:
                     min_score = None
-            if any((ft, fm, fs, fty, fq, notable, min_score is not None)):
-                source = idx.get("findings") or idx.get("records") or []
-                stats = filter_stats(
-                    source,
+            if any((ft, fm, fs, fty, fq, notable, min_score is not None, min_conf, conf)):
+                _rows, stats = query_store(
                     target=ft,
                     module=fm,
                     severity=fs,
@@ -375,6 +437,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     q=fq,
                     notable=True if notable else None,
                     min_score=min_score,
+                    confidence=conf or None,
+                    min_confidence=min_conf or None,
+                    limit=1,
+                    offset=0,
                 )
                 base["filtered"] = True
                 base["record_count"] = stats["total"]
@@ -448,21 +514,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 limit, offset = 200, 0
             limit = max(1, min(limit, 2000))
             offset = max(0, offset)
-            source = idx.get("findings") or idx.get("records") or []
             ft = q("target") or None
             fm = q("module") or None
             fs = q("severity") or None
             fty = q("type") or None
             fq = q("q") or None
             notable = q("notable", "").lower() in ("1", "true", "yes")
+            # Default: hide C0 inventory. Pass min_confidence=C0 or confidence=all to see everything.
+            raw_min = (q("min_confidence") or q("min_conf") or "").upper()
+            raw_conf = (q("confidence") or "").upper()
+            if raw_conf in ("ALL", "C0") or raw_min == "C0":
+                min_conf = ""
+                conf = ""
+            elif raw_conf in ("C1", "C2", "C3", "C4"):
+                min_conf = raw_conf
+                conf = ""
+            elif raw_min in ("C1", "C2", "C3", "C4"):
+                min_conf = raw_min
+                conf = ""
+            else:
+                min_conf = "C1"
+                conf = ""
             min_score = None
             if q("min_score"):
                 try:
                     min_score = int(q("min_score"))
                 except ValueError:
                     min_score = None
-            stats = filter_stats(
-                source,
+            rows, stats = query_store(
                 target=ft,
                 module=fm,
                 severity=fs,
@@ -470,25 +549,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 q=fq,
                 notable=True if notable else None,
                 min_score=min_score,
+                confidence=conf or None,
+                min_confidence=min_conf or None,
+                limit=limit,
+                offset=offset,
             )
             total = stats["total"]
             # Clamp offset so filters never return an empty page due to old pagination
             if offset >= total and total > 0:
                 offset = 0
-            if offset < 0:
-                offset = 0
-            rows = filter_findings(
-                source,
-                target=ft,
-                module=fm,
-                severity=fs,
-                ftype=fty,
-                q=fq,
-                notable=True if notable else None,
-                min_score=min_score,
-                limit=limit,
-                offset=offset,
-            )
+                rows, stats = query_store(
+                    target=ft, module=fm, severity=fs, ftype=fty, q=fq,
+                    notable=True if notable else None, min_score=min_score,
+                    confidence=conf or None, min_confidence=min_conf or None,
+                    limit=limit, offset=0,
+                )
             self._send_json({
                 "total": total,
                 "offset": offset,
@@ -507,6 +582,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "q": fq or "",
                     "notable": notable,
                     "min_score": min_score if min_score is not None else "",
+                    "min_confidence": min_conf,
+                    "confidence": conf,
                 },
                 "output_fingerprint": idx.get("output_fingerprint"),
                 "generated_at": idx.get("generated_at"),
@@ -555,6 +632,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 for f in (idx.get("findings") or [])
             })
             self._send_json({"modules": mods})
+            return
+
+        if path in ("/api/inbox", "/api/hunter"):
+            from hunter.ops import build_inbox
+            try:
+                limit = int(q("limit", "40"))
+            except ValueError:
+                limit = 40
+            payload = build_inbox(target=q("target") or None, limit=limit)
+            self._send_json(payload)
             return
 
         # --- Prove layer (safe validation results) ---
@@ -637,17 +724,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path in ("/api/stats/charts", "/api/charts"):
             idx = _get_index(force=force)
             ft = q("target") or None
-            records = idx.get("findings") or []
-            if ft:
-                records = [r for r in records if r.get("target") == ft]
-            by_sev: dict[str, int] = {}
-            by_mod: dict[str, int] = {}
-            by_type: dict[str, int] = {}
+            records, stats = query_store(target=ft, limit=5000, offset=0)
+            if not records:
+                records = idx.get("findings") or []
+                if ft:
+                    records = [r for r in records if r.get("target") == ft]
+            by_sev: dict[str, int] = dict(stats.get("by_severity") or {})
+            by_mod: dict[str, int] = dict(stats.get("by_module") or {})
+            by_type: dict[str, int] = dict(stats.get("by_type") or {})
             score_buckets = {"0-39": 0, "40-74": 0, "75-99": 0, "100+": 0}
+            fill_dims = not by_sev
             for r in records:
-                by_sev[r.get("severity", "unknown")] = by_sev.get(r.get("severity", "unknown"), 0) + 1
-                by_mod[r.get("module", "other")] = by_mod.get(r.get("module", "other"), 0) + 1
-                by_type[r.get("ftype", "other")] = by_type.get(r.get("ftype", "other"), 0) + 1
+                if fill_dims:
+                    by_sev[r.get("severity", "unknown")] = by_sev.get(r.get("severity", "unknown"), 0) + 1
+                    by_mod[r.get("module", "other")] = by_mod.get(r.get("module", "other"), 0) + 1
+                    by_type[r.get("ftype", "other")] = by_type.get(r.get("ftype", "other"), 0) + 1
                 sc = int(r.get("score") or 0)
                 if sc >= 100:
                     score_buckets["100+"] += 1
@@ -776,7 +867,7 @@ def _guess_lan_ips() -> list[str]:
 
 
 def run_server(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8787,
     *,
     open_browser: bool = True,
@@ -811,14 +902,15 @@ def run_server(
             f"{port} in the VM firewall if the host cannot connect"
         )
     else:
-        print(f"[dashboard] cyber UI → http://{host}:{port}/")
-    print("[dashboard] v3.0.0 STARFLEET BRIDGE — mission replay + fleet board")
-    print("[dashboard] mission:  GET /api/mission?target=…")
+        print(f"[dashboard] UI → http://{host}:{port}/")
+    print("[dashboard] reconkit dashboard — scan tracker + findings + inbox + proofs")
+    print("[dashboard] inbox:    GET /api/inbox?target=…")
+    print("[dashboard] scan:     GET /api/scan?target=…")
     print("[dashboard] live poll: UI watches /api/status — new scans auto-reload")
     print("[dashboard] reindex:  POST /api/reindex  or REINDEX button")
     print(
-        "[dashboard] security: binds on all interfaces by default — "
-        "do not expose to the public internet"
+        "[dashboard] default bind is 127.0.0.1 — pass --host 0.0.0.0 for LAN/VM access. "
+        "Do not expose to the public internet."
     )
     print("[dashboard] Ctrl+C to stop")
     # Prefer opening loopback in a local browser (0.0.0.0 is not a valid browse URL)
@@ -840,9 +932,9 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="reconkit cyber dashboard (local / VM)")
     p.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="Bind address (default 0.0.0.0 = all interfaces, reachable from host/LAN). "
-             "Use 127.0.0.1 for localhost-only.",
+        default="127.0.0.1",
+        help="Bind address (default 127.0.0.1 localhost-only). "
+             "Use 0.0.0.0 to reach the UI from a VM host / LAN.",
     )
     p.add_argument("--port", type=int, default=8787, help="Port (default 8787)")
     p.add_argument("--no-browser", action="store_true", help="Do not open a browser tab")

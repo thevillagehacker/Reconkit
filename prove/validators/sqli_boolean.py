@@ -42,6 +42,7 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     timeout = float(policy.get("request_timeout_sec") or 15)
     ua = str(policy.get("user_agent") or "reconkit-prove/2.2.0")
 
+    r_base = http_get(url, timeout=timeout, user_agent=ua)
     r_true = http_get(true_url, timeout=timeout, user_agent=ua)
     r_false = http_get(false_url, timeout=timeout, user_agent=ua)
 
@@ -63,8 +64,9 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     status_diff = st != sf
     hash_diff = ht != hf
 
-    # Heuristic: meaningful difference without requiring huge pages
-    interesting = (len_diff >= 20 or status_diff) and hash_diff
+    # Heuristic: true vs false differ, and true is not identical to the untouched baseline
+    bhash = hashlib.sha1((r_base.get("body") or "").encode("utf-8", errors="replace")).hexdigest()[:12]
+    interesting = (len_diff >= 20 or status_diff) and hash_diff and ht != bhash
 
     evidence = (
         f"boolean canary (single pair only)\n"

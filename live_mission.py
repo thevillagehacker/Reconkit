@@ -1,5 +1,5 @@
 """
-Disk-backed live mission tracker for the bridge dashboard.
+Disk-backed live scan tracker for the dashboard.
 
 Writers (shell / reconkit / agents) publish phase + tool progress.
 Readers (dashboard, separate process) poll the newest file.
@@ -170,7 +170,7 @@ def start_run(
         "current_tool": "",
         "host_current": 0,
         "host_total": 0,
-        "message": f"mission start · {len(mods)} phase(s)",
+        "message": f"scan start · {len(mods)} phase(s)",
         "started_at": time.time(),
         "finished_at": 0.0,
         "elapsed_s": 0.0,
@@ -268,9 +268,9 @@ def set_hosts(*, current: int | None = None, total: int | None = None) -> None:
 def finish_run(*, ok: bool = True, outdir: str = "", message: str = "") -> dict[str, Any]:
     if not message:
         message = (
-            ("mission complete" + (f" · {outdir}" if outdir else ""))
+            ("scan complete" + (f" · {outdir}" if outdir else ""))
             if ok
-            else "mission failed"
+            else "scan failed"
         )
     return publish({
         "active": False,
@@ -355,7 +355,7 @@ def read_live() -> dict[str, Any]:
             "current_tool": "",
             "host_current": 0,
             "host_total": 0,
-            "message": "no live mission file — start /run or /agent",
+            "message": "no live scan file — start /run or /agent",
             "updated_at": 0,
             "stale": True,
             "_path": str(live_path()),

@@ -32,7 +32,7 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 11. [Phase I â€” Notable, diff, doctor, tips](#11-phase-i--notable-diff-doctor-tips)
 12. [Phase J â€” Prove (safe validation)](#12-phase-j--prove-safe-validation)
 13. [Phase K â€” Attack graph](#13-phase-k--attack-graph)
-14. [Phase L â€” Dashboard (typography, Recon / Proofs / Graph / Insights)](#14-phase-l--dashboard)
+14. [Phase L — Dashboard (Scan / Findings / Inbox / Proofs / Graph / Insights)](#14-phase-l--dashboard)
 15. [Phase M â€” Multi-agent LLM (local + cloud + skills)](#15-phase-m--multi-agent-llm-local--cloud--skills)
 16. [Phase N â€” Report, critic, jobs](#16-phase-n--report-critic-jobs)
 17. [Phase O â€” Session utilities](#17-phase-o--session-utilities)
@@ -318,7 +318,22 @@ python reconkit.py run --target example.com
 â–¸ /jobs status <id>
 ```
 
-### G.6 Where results land
+### G.6 Resume, multi-scope, authenticated recon
+
+```text
+/session set --cookie "sid=abc"
+/run example.com --resume
+/run --scope-all --modules subdomains,dns,httpprobe
+/har import capture.har example.com
+/playbook run hunter example.com
+/playbook run auth-surface example.com
+```
+
+`--resume` skips stages whose primary output already exists. `--scope-all`
+runs every root in `~/.reconkit/scope.txt`. Session cookies are sent on httpx
+and prove requests. Full hunter extras: **[HUNTER.md](HUNTER.md)**.
+
+### G.7 Where results land
 
 ```text
 ~/.reconkit/output/example.com/
@@ -420,6 +435,10 @@ Techniques: `xss_reflect` Â· `ssti_math` Â· `nuclei_recheck` Â· `takeover_
 }
 ```
 
+Hunter prove extras (`jwt_inspect`, `cors_origin`, `graphql_typename`,
+`redirect_canary`, `idor_session_diff`) are listed in [HUNTER.md](HUNTER.md)
+and `/prove techniques`.
+
 ### J.3 Queue & run
 
 ```bash
@@ -512,9 +531,15 @@ Open a recon row → **source preview** and Proofs **evidence** panels use the m
 
 ### Tabs
 
+**Scan** · **Findings** · **Inbox** (C1+ hunter triage) · **Proofs** · **Graph** · **Insights**
+
+### Tabs (detail)
+
 | Tab | Use | Example walkthrough |
 |-----|-----|---------------------|
-| **Recon** | Filter module/severity/type/notable; open evidence | Module=`nuclei`, Notable only → open high-score row |
+| **Scan** | Live module tiles | Watch current phase while `/run` is backgrounded |
+| **Findings** | Filter module/severity/type/notable; open evidence | Module=`nuclei`, Notable only → open high-score row |
+| **Inbox** | C1+ hunter triage + suggested prove technique | Same as `/inbox` |
 | **Proofs** | Confirmed / needs_manual / … proofs | Status=`confirmed`, technique=`xss_reflect` |
 | **Graph** | Force-directed attack paths; drag nodes; click detail | Min score `40+`, Reload graph, click edge/node |
 | **Insights** | Bar charts: severity, modules, score buckets, proof status | Pick target → compare severity vs proof status |
@@ -781,17 +806,19 @@ python recon_agents.py check-llm
 
 ---
 
-## 17. Phase O â€” Session utilities
+## 17. Phase O — Session utilities
 
 ```text
-â–¸ /status
-â–¸ /banner
-â–¸ /clear
-â–¸ /cls
-â–¸ /target
-â–¸ /exit
-â–¸ /quit
-â–¸ /q
+/status
+/banner
+/clear
+/target
+/session show
+/session set --cookie "sid=…"
+/inbox
+/evidence example.com
+/wordlist-target example.com
+/exit
 ```
 
 ---
@@ -809,7 +836,7 @@ python reconkit.py setup
 python reconkit.py verify
 python reconkit.py wordlists
 python reconkit.py scope add example.com
-python reconkit.py run --target example.com --modules subdomains,dns,httpprobe,crawl,nuclei
+python reconkit.py run --target example.com --modules subdomains,dns,httpprobe,crawl,jsintel,apis,nuclei
 python reconkit.py findings reindex
 python recon_prove.py queue --target example.com
 python recon_prove.py run --target example.com --dry-run
@@ -914,7 +941,7 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 - [ ] Detection-only recon; prove stays **safe** unless you knowingly change policy
 - [ ] VM `base_url` = **Windows host IP** for Ollama
 - [ ] Cloud API keys only in env / local config (never commit)
-- [ ] Dashboard not public (`0.0.0.0` is LAN-reachable)
+- [ ] Dashboard not public (default is localhost; `--host 0.0.0.0` is LAN-reachable)
 - [ ] Secrets only in `~/.reconkit/secrets.env`
 - [ ] Treat `~/.reconkit/output` as sensitive
 - [ ] `allow_sqli_boolean` / OAST only under program RoE
@@ -930,6 +957,7 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 | Config files, modules detail, troubleshooting | **[USAGE.md](USAGE.md)** |
 | LLM / program / prove / skills quick start | **[AGENTS.md](AGENTS.md)** |
 | Skill suite design + C0–C4 | **[skills/README.md](skills/README.md)** Â· **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** |
+| Hunter extras (session, HAR, inbox, extra modules) | **[HUNTER.md](HUNTER.md)** |
 | Implemented vs future | **[ROADMAP.md](ROADMAP.md)** |
 
 Happy (authorized) hunting.

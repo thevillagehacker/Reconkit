@@ -33,14 +33,14 @@ Loaded only when modules/context match (saves tokens):
 
 | Skill | Module triggers | Keyword / context triggers |
 |-------|-----------------|----------------------------|
-| `reconkit-vuln-idor` | `params`, `crawl` | idor, bola, user_id, userid, account_id, order_id, `/users/`, `/api/v`, uuid |
-| `reconkit-vuln-jwt` | `js` | jwt, eyJ, bearer, access_token, id_token, refresh_token |
-| `reconkit-vuln-graphql` | `crawl` | graphql, `__schema`, introspection, `/graphql`, mutation |
+| `reconkit-vuln-idor` | `params`, `crawl`, `apis` | idor, bola, user_id, userid, account_id, order_id, `/users/`, `/api/v`, uuid |
+| `reconkit-vuln-jwt` | `js`, `jsintel` | jwt, eyJ, bearer, access_token, id_token, refresh_token |
+| `reconkit-vuln-graphql` | `crawl`, `graphql`, `apis` | graphql, `__schema`, introspection, `/graphql`, mutation |
 | `reconkit-vuln-ssrf` | `ssrf_ssti`, `cloud`, `nuclei` | ssrf, webhook, callback, 169.254, metadata, oast, collaborator |
 | `reconkit-vuln-xss` | `xss` | xss, dalfox, kxss, reflected, dom xss |
 | `reconkit-vuln-sqli` | `sqli` | sqli, sql injection, boolean-based, error-based |
-| `reconkit-vuln-takeover` | `dns`, `nuclei` | takeover, cname, dangling, nxdomain, herokuapp, github.io |
-| `reconkit-vuln-secrets` | `js`, `cloud` | secret, AKIA, aws_key, api_key, private key, `-----BEGIN` |
+| `reconkit-vuln-takeover` | `dns`, `nuclei`, `takeover_plus` | takeover, cname, dangling, nxdomain, herokuapp, github.io |
+| `reconkit-vuln-secrets` | `js`, `jsintel`, `cloud`, `gitrecon` | secret, AKIA, aws_key, api_key, private key, `-----BEGIN` |
 
 **Example:** run with `--modules xss` → surface set may include `reconkit-vuln-xss`
 (and up to two more if other signals match). Cap is always **3**.

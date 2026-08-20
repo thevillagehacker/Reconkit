@@ -36,6 +36,8 @@ class Finding:
     meta: dict[str, Any] = field(default_factory=dict)
     score: int = 0
     notable: bool = False
+    confidence: str = "C0"  # C0–C4
+    status: str = "inventory"  # inventory | candidate | needs_prove | confirmed | false_positive | manual
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-recon_shell.py — Cyber-themed interactive prompt for reconkit v3.0.0
+recon_shell.py — interactive prompt for reconkit v3.0.0
 
 Usage:
   python recon_shell.py

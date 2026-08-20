@@ -9,9 +9,9 @@
 
 | After | Run next |
 |-------|----------|
-| subdomains | `dns` + `httpprobe` together when both runnable |
-| httpprobe | `tls`, `crawl`, `content`, `nuclei`, `screenshots` |
-| crawl → urls.txt | `js`, `params`, `xss`, `sqli`, `ssrf_ssti`, `cloud` |
+| subdomains | `permute` then `dns` + `httpprobe` (+ `ports` if wanted) |
+| httpprobe | `tls`, `wellknown`, `crawl`, `content`, `nuclei`, `screenshots` |
+| crawl → urls.txt | `js` → `jsintel`, `params`, `apis`, `xss`, `sqli`, `ssrf_ssti`, `redirect`, `cors`, `graphql`, `cloud` |
 
 ## Yield-based decisions
 

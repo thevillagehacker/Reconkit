@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print a demo of the Starfleet bridge console (banner, prompt, fleet, sample run)."""
+"""Print a demo of the reconkit console (banner, prompt, modules, sample run)."""
 from __future__ import annotations
 
 import os
@@ -24,7 +24,7 @@ import reconkit as rk
 
 def main() -> None:
     print("=" * 72)
-    print("1) SHELL BANNER (Star Trek logo + spacedock + fleet roster)")
+    print("1) SHELL BANNER")
     print("=" * 72)
     theme.print_banner("3.0.0", animate=False)
 
@@ -41,7 +41,7 @@ def main() -> None:
     print()
 
     print("=" * 72)
-    print("3) FULL FLEET ROSTER (all recon modules as starships)")
+    print("3) MODULE ROSTER")
     print("=" * 72)
     print(f"{'MODULE':<14}  {'SHIP':<18}  {'CLASS':<12}  PHASE TITLE")
     print("-" * 72)
@@ -117,24 +117,23 @@ def main() -> None:
     print()
 
     print(
-        f"  ✔  {cyber_bar(100, 24, 'green')}  MISSION COMPLETE  3 ships  00:03:41"
+        f"  ✔  {cyber_bar(100, 24, 'green')}  SCAN COMPLETE  3 modules  00:03:41"
         "  → ~/.reconkit/output/discover.com"
     )
     print()
-    print("[OK] mission complete  ·  job a1b2c3d4e5")
+    print("[OK] scan complete  ·  job a1b2c3d4e5")
     print("  → done discover.com modules=subdomains,dns,httpprobe")
-    print("  bridge ready  ·  type / for orders  ·  /dashboard viewscreen")
+    print("  ready  ·  type / for commands  ·  /dashboard")
     print()
     print(theme.make_prompt("discover.com", 1, "normal"), end="")
     print()
     print()
 
     print("=" * 72)
-    print("6) DASHBOARD BRIDGE (browser) — same fleet names")
+    print("6) DASHBOARD (browser)")
     print("=" * 72)
-    print("  Tabs:  MISSION | SENSORS | PROOF LOCKER | TACTICAL MAP | SCIENCE")
-    print("  Mission view controls: Restart · Play/Pause · 0.5x 1x 2x 4x 8x · scrubber")
-    print("  Panels: chain map · phase activity · live action stream · volume · fleet board")
+    print("  Tabs:  SCAN | FINDINGS | PROOFS | GRAPH | INSIGHTS")
+    print("  Scan view: live modules, pipeline map, pause/resume/stop")
     print()
     from dashboard.mission import MISSION_PHASES
 

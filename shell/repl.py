@@ -1,5 +1,5 @@
 """
-Cyber-themed interactive REPL for reconkit + recon-agents (v2.2.0).
+Interactive REPL for reconkit + recon-agents (v3.0.0).
 
 Features:
   - Colored cyber banner and prompt
@@ -56,7 +56,14 @@ class ReconShell:
         self.target = (target or "").strip()
         self.intro = intro
         self._running = True
+        self._dash_thread = None
         rk.set_verbose(verbose)
+        try:
+            import os
+            self.rate_profile = rk._rate_profile()
+            os.environ.setdefault("RECON_RATE", self.rate_profile)
+        except Exception:
+            self.rate_profile = "normal"
         self._pt_session = None
         self._readline = None
         self._completer_matches: list[str] = []
@@ -257,22 +264,22 @@ class ReconShell:
                 except Exception:
                     pass
 
-        print(theme._c("  [//] bridge offline. stay in authorized space.", theme.C().ORANGE))
+        print(theme._c("  [//] session ended. stay in authorized scope.", theme.C().ORANGE))
         print()
 
     def _print_quick_tips(self) -> None:
         col = theme.C()
-        print(theme._c("  BRIDGE ORDERS", col.BOLD, col.ORANGE))
+        print(theme._c("  COMMANDS", col.BOLD, col.ORANGE))
         tips = [
-            ("/scope add <domain>", "authorize sector (required before missions)"),
-            ("/target <domain>", "set active sector"),
-            ("/scan", "fleet module picker"),
-            ("/run [target]", "deploy mission (bg by default · --fg live)"),
-            ("/dashboard", "open Starfleet viewscreen (browser)"),
-            ("/agent [target]", "LLM ops (planner + specialists)"),
-            ("/pause /stop", "hold or abort active mission"),
-            ("type / …", "LIVE order complete above prompt"),
-            ("/<cmd> -h", "help for any order"),
+            ("/scope add <domain>", "authorize target (required before scans)"),
+            ("/target <domain>", "set active target"),
+            ("/scan", "module picker"),
+            ("/run [target]", "start scan (background by default · --fg to block)"),
+            ("/dashboard", "open local findings dashboard"),
+            ("/agent [target]", "LLM planner + specialists"),
+            ("/pause /stop", "pause or stop the active scan"),
+            ("type / …", "live command complete above prompt"),
+            ("/<cmd> -h", "help for any command"),
         ]
         for cmd, desc in tips:
             print(
@@ -688,6 +695,11 @@ class ReconShell:
         print(f"  {theme._c('output', col.GRAY)}    {rk.OUTPUT_DIR}")
         print(f"  {theme._c('scope', col.GRAY)}     {rk.SCOPE_FILE}")
         try:
+            from hunter.session import summary as sess_summary
+            print(f"  {theme._c('auth', col.GRAY)}     {sess_summary()}")
+        except Exception:
+            pass
+        try:
             scope = sorted(rk.load_scope())
             print(f"  {theme._c('in_scope', col.GRAY)}  {len(scope)} target(s)")
             for d in scope[:12]:
@@ -706,6 +718,39 @@ class ReconShell:
                 print(f"    {line}")
         except Exception as e:
             print(f"  {theme._c('LLM', col.GRAY)}      (not loaded: {e})")
+
+        try:
+            import os
+            prof = getattr(self, "rate_profile", None) or rk._rate_profile()
+            rs = rk.rate_settings()
+            print()
+            print(theme._c("  Rate / index", col.BOLD, col.BRIGHT_CYAN))
+            print(f"    rate       {prof}  (RECON_RATE={os.environ.get('RECON_RATE', '')})")
+            print(
+                f"    knobs      httpx_threads={rs.get('httpx_threads')}  "
+                f"nuclei_rl={rs.get('nuclei_rate')}  host_cap={rs.get('host_cap')}  "
+                f"js_cap={rs.get('js_cap')}  delay={rs.get('delay_s')}s"
+            )
+        except Exception:
+            pass
+        try:
+            from findings.db import DB_PATH, usable
+            from findings.indexer import get_or_build_index, output_fingerprint
+            fp = output_fingerprint().get("token") or ""
+            idx = get_or_build_index(refresh=False)
+            sql_ok = usable(fp)
+            print(f"    index      {idx.get('finding_count', 0)} records  backend={'sqlite' if sql_ok else 'json'}")
+            if sql_ok:
+                print(f"    sqlite     {DB_PATH}")
+            from findings.indexer import query_store
+            _rows, st = query_store(min_confidence="C1", limit=1, offset=0)
+            print(
+                f"    C1+        {st.get('total', 0)}  "
+                f"notable={st.get('notable_count', 0)}  "
+                f"by_conf={st.get('by_confidence') or {}}"
+            )
+        except Exception as e:
+            print(f"    index      (unavailable: {e})")
         print()
 
     def cmd_verbose(self, args: list[str]) -> None:
@@ -842,6 +887,120 @@ class ReconShell:
             return
         rk.cmd_keys(self._namespace(keys_action="set", name=name, value=value))
 
+    def cmd_session(self, args: list[str]) -> None:
+        action = (args[0].lower() if args else "show")
+        if action in ("show", "list", "status"):
+            rk.cmd_session(self._namespace(session_action="show"))
+            return
+        if action == "clear":
+            rk.cmd_session(self._namespace(session_action="clear"))
+            return
+        if action != "set":
+            rk.fail("usage: /session [show|set|clear] [--cookie …] [--cookie-b …] [--header …]")
+            return
+        cookie = cookie_b = ""
+        header: list[str] = []
+        header_b: list[str] = []
+        i = 1
+        while i < len(args):
+            a = args[i]
+            if a == "--cookie" and i + 1 < len(args):
+                cookie = args[i + 1]
+                i += 2
+                continue
+            if a.startswith("--cookie=") and not a.startswith("--cookie-b"):
+                cookie = a.split("=", 1)[1]
+                i += 1
+                continue
+            if a in ("--cookie-b", "--cookie_b") and i + 1 < len(args):
+                cookie_b = args[i + 1]
+                i += 2
+                continue
+            if a.startswith("--cookie-b="):
+                cookie_b = a.split("=", 1)[1]
+                i += 1
+                continue
+            if a in ("--header", "-H") and i + 1 < len(args):
+                header.append(args[i + 1])
+                i += 2
+                continue
+            if a in ("--header-b", "--header_b") and i + 1 < len(args):
+                header_b.append(args[i + 1])
+                i += 2
+                continue
+            i += 1
+        rk.cmd_session(self._namespace(
+            session_action="set",
+            cookie=cookie,
+            cookie_b=cookie_b,
+            header=header,
+            header_b=header_b,
+        ))
+
+    def cmd_har(self, args: list[str]) -> None:
+        rest = list(args)
+        if rest and rest[0].lower() in ("import", "load"):
+            rest = rest[1:]
+        if not rest:
+            rk.fail("usage: /har import <file.har> [target]")
+            return
+        path = rest[0]
+        target = rest[1] if len(rest) > 1 else (self.target or "")
+        if not target:
+            rk.fail("pass a target or set /target first")
+            return
+        rk.cmd_har(self._namespace(target=target, file=path))
+
+    def cmd_evidence(self, args: list[str]) -> None:
+        target = ""
+        finding_id = ""
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a in ("--id", "-i") and i + 1 < len(args):
+                finding_id = args[i + 1]
+                i += 2
+                continue
+            if a.startswith("--id="):
+                finding_id = a.split("=", 1)[1]
+                i += 1
+                continue
+            if not a.startswith("-") and not target:
+                target = a
+            i += 1
+        target = target or self.target or ""
+        if not target:
+            rk.fail("usage: /evidence [target] [--id FINDING_ID]")
+            return
+        rk.cmd_evidence(self._namespace(target=target, finding_id=finding_id))
+
+    def cmd_inbox(self, args: list[str]) -> None:
+        from hunter.ops import build_inbox
+        target = (args[0] if args else self.target or "").strip() or None
+        data = build_inbox(target=target, limit=25)
+        col = theme.C()
+        theme.print_section(f"hunter inbox  ({data.get('count', 0)})  {data.get('session', '')}")
+        items = data.get("items") or []
+        if not items:
+            rk.info("no C1+ notable findings — run recon + /findings reindex")
+            return
+        for i, it in enumerate(items, 1):
+            tech = it.get("technique") or "manual"
+            print(
+                f"  {i:2}. [{it.get('confidence') or '?'} {it.get('severity') or '?'}] "
+                f"{theme._c(str(it.get('module') or ''), col.CYAN)}  "
+                f"{(it.get('title') or '')[:36]}  "
+                f"{theme._c((it.get('asset') or '')[:48], col.GRAY)}  "
+                f"→ {tech}"
+            )
+
+    def cmd_wordlist_target(self, args: list[str]) -> None:
+        target = (args[0] if args else self.target or "").strip()
+        if not target:
+            rk.fail("usage: /wordlist-target [target]")
+            return
+        rk.cmd_wordlist_target(self._namespace(target=target))
+
     # ------------------------------------------------------------------ #
     # Recon
     # ------------------------------------------------------------------ #
@@ -869,11 +1028,14 @@ class ReconShell:
         if len(files) > 40:
             print(f"    … +{len(files) - 40} more")
 
-    def _parse_run_args(self, args: list[str]) -> tuple[str | None, str, bool]:
-        """Return (target, modules_csv, background). Supports /run [target] [--modules x] [--bg]."""
+    def _parse_run_args(self, args: list[str]) -> tuple[str | None, str, bool, bool, bool, bool]:
+        """Return (target, modules_csv, background, resume, force, scope_all)."""
         target: str | None = None
         modules = "all"
         background = False
+        resume = False
+        force = False
+        scope_all = False
         i = 0
         while i < len(args):
             a = args[i]
@@ -889,6 +1051,18 @@ class ReconShell:
                 background = True
                 i += 1
                 continue
+            if a in ("--resume",):
+                resume = True
+                i += 1
+                continue
+            if a in ("--force",):
+                force = True
+                i += 1
+                continue
+            if a in ("--scope-all", "--scope_all"):
+                scope_all = True
+                i += 1
+                continue
             if a.startswith("-"):
                 rk.warn(f"unknown flag ignored: {a}")
                 i += 1
@@ -898,7 +1072,7 @@ class ReconShell:
             i += 1
         if target is None:
             target = self.target or None
-        return target, modules, background
+        return target, modules, background, resume, force, scope_all
 
     def _start_run_job(
         self,
@@ -907,6 +1081,9 @@ class ReconShell:
         *,
         force_fg: bool = False,
         source: str = "run",
+        resume: bool = False,
+        force: bool = False,
+        scope_all: bool = False,
     ) -> None:
         """
         Start a recon run (shared by /run /quick /full /scan /playbook).
@@ -915,28 +1092,36 @@ class ReconShell:
         Use --fg for blocking foreground. Always seeds live_mission for the dashboard.
         """
         self._apply_verbose_to_reconkit()
-        ns = self._namespace(target=target, modules=modules, source=source)
+        ns = self._namespace(
+            target=target,
+            modules=modules,
+            source=source,
+            resume=resume,
+            force=force,
+            scope_all=scope_all,
+        )
 
         # Eager live tracker seed (before job thread starts) so the UI flips immediately
-        try:
-            from live_mission import start_run
-            from pathlib import Path
-            mods = (
-                list(rk.ALL_MODULES)
-                if modules.strip().lower() == "all"
-                else [m.strip() for m in modules.split(",") if m.strip()]
-            )
-            outdir = Path(rk.OUTPUT_DIR) / target.replace("*", "_")
-            outdir.mkdir(parents=True, exist_ok=True)
-            start_run(target=target, modules=mods, outdir=outdir, source=source)
-            print(
-                theme._c(
-                    f"  live tracker · source={source} · {len(mods)} phase(s) · {outdir}",
-                    theme.C().GRAY,
+        if target and not scope_all:
+            try:
+                from live_mission import start_run
+                from pathlib import Path
+                mods = (
+                    list(rk.ALL_MODULES)
+                    if modules.strip().lower() == "all"
+                    else [m.strip() for m in modules.split(",") if m.strip()]
                 )
-            )
-        except Exception:
-            pass
+                outdir = Path(rk.OUTPUT_DIR) / target.replace("*", "_")
+                outdir.mkdir(parents=True, exist_ok=True)
+                start_run(target=target, modules=mods, outdir=outdir, source=source)
+                print(
+                    theme._c(
+                        f"  live tracker · source={source} · {len(mods)} phase(s) · {outdir}",
+                        theme.C().GRAY,
+                    )
+                )
+            except Exception:
+                pass
 
         if force_fg:
             rk.info("foreground run — Ctrl+C to interrupt ( /pause needs background )")
@@ -955,14 +1140,22 @@ class ReconShell:
         print("  tip:       /outdir " + target + "  ·  /dashboard for live phase tiles")
 
     def cmd_run(self, args: list[str]) -> None:
-        target, modules, background = self._parse_run_args(args)
-        if not target:
-            rk.fail("usage: /run [target] [--modules a,b,c|all] [--bg|--fg]")
+        target, modules, background, resume, force, scope_all = self._parse_run_args(args)
+        if not target and not scope_all:
+            rk.fail("usage: /run [target] [--modules a,b,c|all] [--bg|--fg] [--resume] [--scope-all]")
             return
         # --bg is default now; --fg forces foreground
         force_fg = any(a in ("--fg", "--foreground") for a in args)
         # explicit --bg still background; no flag → background (for pause/stop)
-        self._start_run_job(target, modules, force_fg=force_fg, source="run")
+        self._start_run_job(
+            target or "",
+            modules,
+            force_fg=force_fg,
+            source="run",
+            resume=resume,
+            force=force,
+            scope_all=scope_all,
+        )
 
     def cmd_quick(self, args: list[str]) -> None:
         target = self._require_target(args, 0)
@@ -1392,61 +1585,109 @@ class ReconShell:
     # Dashboard / findings
     # ------------------------------------------------------------------ #
     def cmd_findings(self, args: list[str]) -> None:
-        from findings.indexer import get_or_build_index, index_all_targets, index_target
+        from findings.indexer import get_or_build_index, index_all_targets, query_store
         from findings.store import INDEX_FILE
 
-        action = (args[0].lower() if args else "summary")
+        include_c0 = False
+        min_conf = "C1"
+        limit = 25
+        positional: list[str] = []
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--all":
+                include_c0 = True
+                min_conf = ""
+            elif a in ("--min-confidence", "--min-conf", "--confidence") and i + 1 < len(args):
+                min_conf = args[i + 1].upper()
+                i += 1
+            elif a.startswith("--min-confidence=") or a.startswith("--confidence="):
+                min_conf = a.split("=", 1)[1].upper()
+            elif a == "--limit" and i + 1 < len(args):
+                limit = int(args[i + 1])
+                i += 1
+            elif not a.startswith("-"):
+                positional.append(a)
+            i += 1
+
+        action = (positional[0].lower() if positional else "summary")
         if action in ("reindex", "rebuild", "index"):
-            rk.info("indexing ~/.reconkit/output …")
+            rk.info("indexing ~/.reconkit/output → JSON + SQLite …")
             payload = index_all_targets(persist=True)
             rk.ok(
                 f"indexed {payload.get('target_count', 0)} target(s), "
                 f"{payload.get('finding_count', 0)} finding(s) → {INDEX_FILE}"
             )
+            try:
+                from findings.db import DB_PATH
+                rk.ok(f"sqlite → {DB_PATH}")
+            except Exception:
+                pass
             return
 
         target = None
-        if action == "summary" and len(args) > 1:
-            target = args[1]
-        elif action not in ("summary", "show", "stat", "stats") and not action.startswith("-"):
-            # /findings example.com
-            target = action
+        if action == "summary" and len(positional) > 1:
+            target = positional[1]
+        elif action not in ("summary", "show", "stat", "stats"):
+            target = positional[0]
+
+        kw: dict = {"limit": limit, "offset": 0}
+        if target:
+            kw["target"] = target
+        if not include_c0 and min_conf and min_conf != "ALL":
+            kw["min_confidence"] = min_conf if min_conf != "C0" else None
+            if kw.get("min_confidence") is None:
+                kw.pop("min_confidence", None)
 
         if target:
-            summary, findings = index_target(target)
+            rows, stats = query_store(**kw)
             rk.banner(f"Findings: {target}")
-            print(f"  count:    {summary.finding_count}")
-            print(f"  outdir:   {summary.outdir}")
-            print(f"  modules:  {summary.by_module}")
-            print(f"  severity: {summary.by_severity}")
-            print(f"  types:    {summary.by_type}")
-            # show top 15 non-info if any
-            hot = [f for f in findings if f.severity in ("critical", "high", "medium")][:15]
-            if hot:
-                print("\n  notable:")
-                for f in hot:
-                    print(f"    [{f.severity}] {f.module}: {f.title} — {f.asset[:80]}")
+            print(f"  matching: {stats.get('total', len(rows))}  "
+                  f"(filter min_confidence={kw.get('min_confidence') or 'all'})")
+            print(f"  modules:  {stats.get('by_module') or {}}")
+            print(f"  severity: {stats.get('by_severity') or {}}")
+            print(f"  conf:     {stats.get('by_confidence') or {}}")
+            print(f"  backend:  {stats.get('backend')}")
+            show = rows[:limit]
+            if show:
+                print()
+                for f in show:
+                    print(
+                        f"    [{f.get('confidence') or 'C0'}] [{f.get('severity')}] "
+                        f"{f.get('module')}: {f.get('title')} — {(f.get('asset') or '')[:70]}"
+                    )
+            else:
+                rk.warn("no rows — run recon + /findings reindex, or /findings T --all")
             return
 
         payload = get_or_build_index(refresh=False)
+        _rows, st = query_store(min_confidence="C1", limit=1, offset=0)
         rk.banner("Findings index")
         print(f"  generated: {payload.get('generated_at') or '(never — run /findings reindex)'}")
-        print(f"  targets:   {payload.get('target_count', 0)}")
-        print(f"  findings:  {payload.get('finding_count', 0)}")
-        print(f"  index:     {INDEX_FILE}")
+        print(f"  targets:   {payload.get('target_count') or len(payload.get('targets') or {})}")
+        print(f"  findings:  {payload.get('finding_count', 0)} total  ·  C1+ {st.get('total', 0)}")
+        print(f"  json:      {INDEX_FILE}")
+        try:
+            from findings.db import DB_PATH, usable
+            from findings.indexer import output_fingerprint
+            print(f"  sqlite:    {DB_PATH}  ({'current' if usable(output_fingerprint().get('token')) else 'missing/stale'})")
+        except Exception:
+            pass
         for name, info in sorted((payload.get("targets") or {}).items()):
             print(f"    • {name}: {info.get('finding_count', 0)} findings")
 
     def cmd_dashboard(self, args: list[str]) -> None:
-        # 0.0.0.0 = reachable from Windows host when agents run inside a VM
-        host = "0.0.0.0"
+        host = "127.0.0.1"
         port = 8787
         open_browser = True
+        background = False
         i = 0
         while i < len(args):
             a = args[i]
             if a == "--no-browser":
                 open_browser = False
+            elif a in ("--bg", "--background"):
+                background = True
             elif a == "--host" and i + 1 < len(args):
                 host = args[i + 1]
                 i += 1
@@ -1456,12 +1697,33 @@ class ReconShell:
             elif a.isdigit():
                 port = int(a)
             i += 1
+        browse = f"http://127.0.0.1:{port}/"
         rk.info(
-            f"starting dashboard on {host}:{port}  "
-            f"(local http://127.0.0.1:{port}/ — from host use http://<VM_IP>:{port}/). "
-            "Ctrl+C stops the server; use a second terminal if you still need the shell."
+            f"dashboard bind {host}:{port}  → {browse}"
+            + ("" if host in ("127.0.0.1", "localhost") else f"  LAN: http://<host-ip>:{port}/")
         )
         from dashboard.server import run_server
+        if background:
+            if self._dash_thread is not None and self._dash_thread.is_alive():
+                rk.warn(f"dashboard already running in background → {browse}")
+                return
+            import threading
+            t = threading.Thread(
+                target=run_server,
+                kwargs={
+                    "host": host,
+                    "port": port,
+                    "open_browser": open_browser,
+                    "refresh": True,
+                },
+                name="reconkit-dashboard",
+                daemon=True,
+            )
+            self._dash_thread = t
+            t.start()
+            rk.ok(f"dashboard background → {browse}  (shell stays usable)")
+            return
+        rk.info("blocking this prompt until Ctrl+C — use /dashboard --bg to keep the shell")
         run_server(host=host, port=port, open_browser=open_browser, refresh=True)
 
     # ------------------------------------------------------------------ #
@@ -1472,7 +1734,7 @@ class ReconShell:
             self.rate_profile = "normal"
 
     def cmd_notable(self, args: list[str]) -> None:
-        from findings.indexer import get_or_build_index, filter_findings
+        from findings.indexer import query_store
         from findings.scoring import NOTABLE_THRESHOLD
 
         target = None
@@ -1488,12 +1750,11 @@ class ReconShell:
                 target = a
             i += 1
         target = target or self.target or None
-        idx = get_or_build_index(refresh=False)
-        rows = filter_findings(
-            idx.get("findings") or [],
+        rows, stats = query_store(
             target=target,
             notable=True,
             limit=limit,
+            offset=0,
         )
         rk.banner(f"Notable records (score≥{NOTABLE_THRESHOLD})" + (f" — {target}" if target else ""))
         if not rows:
@@ -1501,10 +1762,57 @@ class ReconShell:
             return
         for f in rows:
             print(
-                f"  [{f.get('score')}] {f.get('severity')}  {f.get('module'):12}  "
-                f"{f.get('ftype'):10}  {(f.get('asset') or '')[:70]}"
+                f"  [{f.get('score')}] [{f.get('confidence') or 'C0'}] {f.get('severity')}  "
+                f"{str(f.get('module') or ''):12}  {str(f.get('ftype') or ''):10}  "
+                f"{(f.get('asset') or '')[:70]}"
             )
-        print(f"\n  {len(rows)} shown  ·  threshold={NOTABLE_THRESHOLD}")
+        print(
+            f"\n  {len(rows)} shown / {stats.get('total', len(rows))} notable  "
+            f"· threshold={NOTABLE_THRESHOLD}  · {stats.get('backend')}"
+        )
+
+    def cmd_eval(self, args: list[str]) -> None:
+        from agents.eval import evaluate_findings, format_eval_report
+        from findings.indexer import query_store
+
+        target = self.target or None
+        limit = 15
+        use_llm = False
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--llm":
+                use_llm = True
+            elif a == "--limit" and i + 1 < len(args):
+                limit = int(args[i + 1])
+                i += 1
+            elif a.startswith("--limit="):
+                limit = int(a.split("=", 1)[1])
+            elif not a.startswith("-"):
+                target = a
+            i += 1
+        rows, stats = query_store(
+            target=target or None,
+            min_confidence="C1",
+            limit=max(limit, 30),
+            offset=0,
+        )
+        if not rows:
+            rk.warn("no C1+ findings — run recon + /findings reindex")
+            return
+        llm = None
+        if use_llm:
+            try:
+                from agents.llm import LLMClient
+                llm = LLMClient()
+            except Exception as e:
+                rk.warn(f"LLM unavailable ({e}); heuristic only")
+                use_llm = False
+        ev = evaluate_findings(rows, limit=limit, use_llm=use_llm, llm=llm)
+        theme.print_section(
+            f"eval C0–C4{f' — {target}' if target else ''}  ({stats.get('backend')})"
+        )
+        print(format_eval_report(ev))
 
     def cmd_diff(self, args: list[str]) -> None:
         from findings.history import diff_target
@@ -1678,7 +1986,17 @@ class ReconShell:
         import os
         self.__init_rate()
         if not args or args[0] in ("show", "status"):
+            rs = rk.rate_settings()
             rk.info(f"rate profile: {self.rate_profile}")
+            print(
+                f"  httpx_threads={rs.get('httpx_threads')}  katana_depth={rs.get('katana_depth')}  "
+                f"nuclei_rl={rs.get('nuclei_rate')}  nuclei_c={rs.get('nuclei_conc')}"
+            )
+            print(
+                f"  host_cap={rs.get('host_cap')}  crawl_hosts={rs.get('crawl_hosts')}  "
+                f"js_cap={rs.get('js_cap')}  ffuf_t={rs.get('ffuf_threads')}  "
+                f"delay_s={rs.get('delay_s')}"
+            )
             return
         prof = args[0].lower()
         profiles = {
@@ -1691,7 +2009,16 @@ class ReconShell:
             return
         self.rate_profile = prof
         os.environ["RECON_RATE"] = profiles[prof]["RECON_RATE"]
+        try:
+            rk.persist_rate_profile(prof)
+        except Exception:
+            pass
         rk.ok(f"rate → {prof}: {profiles[prof]['hint']}")
+        rs = rk.rate_settings()
+        print(
+            f"  httpx_threads={rs.get('httpx_threads')}  nuclei_rl={rs.get('nuclei_rate')}  "
+            f"host_cap={rs.get('host_cap')}  delay_s={rs.get('delay_s')}"
+        )
 
     def cmd_prove(self, args: list[str]) -> None:
         """Safe validation of recon findings (v2.2.0 prove layer)."""
@@ -1951,7 +2278,7 @@ class ReconShell:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="recon-shell",
-        description="Cyber-themed interactive reconkit shell (v2.2.0)",
+        description="Interactive reconkit shell (v3.0.0)",
     )
     parser.add_argument("--target", default="", help="Pre-set active target")
     parser.add_argument(

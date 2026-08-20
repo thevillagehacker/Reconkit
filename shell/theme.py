@@ -1,6 +1,6 @@
 """Cyberwarfare shell UI for reconkit (v3.0.0).
 
-Red/black ops-console aesthetic — no spacedock / starship hull art on banner.
+Red/black ops-console aesthetic.
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ def _print_block(text: str, *color_codes, width: int | None = None) -> None:
 
 
 def _print_cyber_boot(col, animate: bool = True) -> None:
-    """Short cyberwarfare boot lines (no spacedock)."""
+    """Short boot lines."""
     lines = list(CYBER_SCAN_LINES)
     if animate and _animate_enabled():
         for i, line in enumerate(lines):
@@ -159,7 +159,7 @@ def print_banner(version: str = "3.0.0", animate: bool = True) -> None:
     print(_c(" " * max(0, (min(w, 78) - 28) // 2) + "R E C O N K I T   ·   C Y B E R   O P S", col.DIM, col.GRAY))
     print()
 
-    # Cyber frame (compact — replaces spacedock)
+    # Compact frame
     for line in CYBER_BANNER.splitlines():
         if "[//]" in line or "CYBERWARFARE" in line:
             print(_c(line, col.BOLD, col.BRIGHT_RED if hasattr(col, "BRIGHT_RED") else col.ORANGE))
@@ -193,7 +193,7 @@ def print_banner(version: str = "3.0.0", animate: bool = True) -> None:
     )
     print(_c(bar, col.ORANGE))
 
-    # Module roster (compact cyber units — not starship hulls)
+    # Module roster
     print(_c("  MODULE NODES", col.BOLD, col.NEON_PINK))
     row: list[str] = []
     for mod, name, _klass in FLEET:

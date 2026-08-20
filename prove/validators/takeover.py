@@ -61,22 +61,26 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         f"body_snippet={(body[:240] or '').replace(chr(10), ' ')}"
     )
 
-    if hits and cname:
+    dangling = bool(cname) and not a_recs
+    if hits and dangling:
         return {
             "status": "confirmed",
-            "evidence": evidence,
+            "evidence": evidence + "\ndangling=yes (CNAME present, no A/AAAA)",
             "impact_note": (
                 "Dangling CNAME + provider fingerprint — possible subdomain takeover. "
                 "Do NOT auto-claim; follow program rules and provider process manually."
             ),
-            "meta": {"cname": cname, "fingerprints": hits},
+            "meta": {"cname": cname, "fingerprints": hits, "dangling": True, "a": a_recs},
         }
     if hits or cname:
         return {
             "status": "needs_manual",
-            "evidence": evidence,
-            "impact_note": "Partial takeover signals — manual DNS/provider review required.",
-            "meta": {"cname": cname, "fingerprints": hits},
+            "evidence": evidence + f"\ndangling={dangling}",
+            "impact_note": (
+                "Partial takeover signals — need dangling DNS (NXDOMAIN / no A) "
+                "plus a provider fingerprint before reporting."
+            ),
+            "meta": {"cname": cname, "fingerprints": hits, "dangling": dangling, "a": a_recs},
         }
     return {
         "status": "not_exploitable",

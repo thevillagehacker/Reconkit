@@ -171,5 +171,5 @@ skills/
   reconkit-vuln-secrets/SKILL.md
 ```
 
-Loader: `agents/skills.py` Â· pre-eval: `agents/eval.py`  
-User docs: **USAGE.md Â§21** Â· **OPERATIONS.md Â§14** Â· **WORKFLOW.md Phase M**.
+Loader: `agents/skills.py` · pre-eval: `agents/eval.py`  
+User docs: **USAGE.md §21** · **OPERATIONS.md §14** · **WORKFLOW.md Phase M** · **[HUNTER.md](../HUNTER.md)**.

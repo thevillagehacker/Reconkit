@@ -1,5 +1,5 @@
 """
-reconkit interactive cyber shell (v2.0.1).
+reconkit interactive shell (v3.0.0).
 
 Launch:
   python recon_shell.py
@@ -10,4 +10,4 @@ Launch:
 from .repl import ReconShell
 
 __all__ = ["ReconShell"]
-__version__ = "2.0.1"
+__version__ = "3.0.0"

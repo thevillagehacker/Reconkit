@@ -7,7 +7,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from prove.http_util import http_get, inject_query_marker
+from prove.http_util import baseline_diff, http_get, inject_query_marker
 
 _CONTEXT_HINTS = {
     "html_body": "Reflected in HTML text — often needs markup breakout.",
@@ -34,8 +34,19 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     test_url = inject_query_marker(url, marker)
     timeout = float(policy.get("request_timeout_sec") or 15)
     ua = str(policy.get("user_agent") or "reconkit-prove/2.2.0")
+    base = http_get(url, timeout=timeout, user_agent=ua)
     resp = http_get(test_url, timeout=timeout, user_agent=ua)
     body = resp.get("body") or ""
+    base_body = base.get("body") or ""
+    if marker in base_body:
+        return {
+            "status": "false_positive",
+            "evidence": (
+                f"Baseline already contains marker {marker} — not injection.\nurl={url}"
+            ),
+            "impact_note": "",
+            "meta": {"test_url": test_url, "baseline": True},
+        }
     if resp.get("error") and resp.get("status") is None:
         return {
             "status": "error",
@@ -67,12 +78,14 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
             ctx = "encoded"
         next_step = _CONTEXT_HINTS.get(ctx, _CONTEXT_HINTS["unknown"])
 
+    diff = baseline_diff(base, resp)
     if reflected:
         return {
             "status": "confirmed",
             "evidence": (
                 f"Marker reflected (raw={reflected_raw}, encoded={reflected_enc}) "
-                f"context={ctx} HTTP {resp.get('status')}.\n"
+                f"context={ctx} HTTP {resp.get('status')} "
+                f"(baseline HTTP {base.get('status')}, len_diff={diff['len_diff']}).\n"
                 f"url={test_url}\n"
                 f"snippet={_snippet(body, marker if reflected_raw else html_enc)}\n"
                 f"next={next_step}"

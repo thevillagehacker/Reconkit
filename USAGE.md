@@ -55,6 +55,7 @@ agent skill suite** (C0–C4 FP reduction). It does **not** run exploit framewor
 25. [Safety & ethics](#25-safety--ethics)
 26. [Troubleshooting](#26-troubleshooting)
 27. [Complete operations index](#27-complete-operations-index)
+28. [Hunter extras](#28-hunter-extras)
 
 ---
 
@@ -97,11 +98,13 @@ v3.0.0/                          # â† cd here for all commands
 â”œâ”€â”€ USAGE.md                     # this reference
 â”œâ”€â”€ WORKFLOW.md                  # ordered hunt + examples
 â”œâ”€â”€ OPERATIONS.md                # every CLI/shell/API operation
+â”œâ”€â”€ HUNTER.md                    # hunter extras (session, HAR, inbox, extra modules)
 â”œâ”€â”€ AGENTS.md
 â”œâ”€â”€ ROADMAP.md
 â”œâ”€â”€ reconkit.py                  # pipeline + setup + scope + prove CLI
 â”œâ”€â”€ recon_shell.py               # interactive cyber prompt
-â”œâ”€â”€ recon_dashboard.py           # web UI (Recon/Proofs/Graph/Insights)
+â”œâ”€â”€ recon_dashboard.py           # web UI (Scan/Findings/Inbox/Proofs/Graph/Insights)
+â”œâ”€â”€ hunter/                      # session, extra stages, HAR, evidence, inbox
 â”œâ”€â”€ recon_agents.py              # multi-agent CLI (local + cloud)
 â”œâ”€â”€ recon_prove.py               # safe validation CLI
 â”œâ”€â”€ prove/                       # queue, validators, policy, store
@@ -146,6 +149,7 @@ Runtime data is **outside the repo** so you never commit secrets or scan loot.
 â”œâ”€â”€ config.json              # reconkit settings
 â”œâ”€â”€ scope.txt                # authorized targets (hard gate)
 â”œâ”€â”€ secrets.env              # API keys (owner-only; never commit)
+â”œâ”€â”€ session.json             # optional auth cookies/headers (chmod 600; never commit)
 â”œâ”€â”€ agent_config.json        # optional user-global LLM config
 â”œâ”€â”€ wordlists/               # SecLists, OneListForAll, resolvers
 â”œâ”€â”€ logs/
@@ -317,26 +321,41 @@ python reconkit.py modules
 | Module | What it does |
 |--------|----------------|
 | `subdomains` | subfinder, amass, assetfinder, chaos, findomain, crt.sh, Wayback, HackerTarget → merge/dedupe |
+| `permute` | Capped DNS permutations (alterx/dnsgen) then dnsx |
 | `dns` | dnsx multi-record + CNAME takeover fingerprint candidates |
-| `httpprobe` | httpx alive hosts, title, status, tech |
+| `ports` | In-scope naabu connect-scan of common web/data ports + httpx |
+| `httpprobe` | httpx alive hosts, title, status, tech (session headers; WAF → stealth) |
 | `tls` | tlsx cert details, expiry/self-signed/mismatch, JARM |
-| `crawl` | katana, gospider, hakrawler, gau, waybackurls → merge/dedupe URLs |
+| `wellknown` | robots.txt, sitemap, security.txt, OpenID, assetlinks |
+| `crawl` | katana, gospider, hakrawler, gau, waybackurls → **in-scope URLs only** |
 | `js` | collect `.js`, regex extract secrets/endpoints (read-only) |
+| `jsintel` | sourcemaps, hidden routes, API paths, JS library versions, GitHub URLs |
 | `params` | unfurl param names + arjun hidden params |
+| `apis` | `/api/` `/graphql` `/swagger` harvest + IDOR-shaped parameter URLs |
 | `content` | sensitive paths + ffuf directory fuzz |
+| `bypass403` | header/path 401/403 probes (**no** password spray) |
+| `gfextra` | gf redirect / lfi / interestingparams candidate lists |
 | `xss` | gf xss → kxss → dalfox (**detection** of candidates) |
 | `sqli` | gf sqli → error/boolean **detection canaries** (non-destructive) |
 | `ssrf_ssti` | cloud-metadata SSRF probe + `{{7*7}}` SSTI canary |
-| `nuclei` | CVE / takeover / panel / misconfig templates |
+| `redirect` | open-redirect canary (OAST or `.invalid` bounce) |
+| `cors` | CORS ACAO reflection with Origin canary |
+| `graphql` | GraphQL `{__typename}` detect (no schema dump) |
+| `nuclei` | CVE / takeover / panel / misconfig + tech-tagged templates |
 | `cloud` | S3/Azure/GCP/Firebase refs + read-only S3 public list check |
+| `takeover_plus` | package.json / dangling JS CDN 404s (no auto-claim) |
+| `osint` | Shodan/Censys queries constrained to **this hostname** |
+| `gitrecon` | GitHub/GitLab URL harvest + optional trufflehog on one public repo |
 | `screenshots` | gowitness screenshots of alive hosts |
 
 **Dependency order (logical):**
 
 ```
-subdomains → dns / httpprobe → tls, crawl, content, nuclei, screenshots
-crawl → js, params, xss, sqli, ssrf_ssti, cloud
+subdomains → permute → dns / ports / httpprobe → tls, wellknown, crawl, content, nuclei, screenshots
+crawl → js → jsintel, params, apis, gfextra, xss, sqli, ssrf_ssti, redirect, cors, graphql, cloud, takeover_plus, gitrecon
 ```
+
+Hunter extras walkthrough: **[HUNTER.md](HUNTER.md)**.
 
 Missing tools print `[WARN]` and skip that stage â€” they do not crash the whole run.
 
@@ -356,6 +375,8 @@ python reconkit.py run --target example.com --modules subdomains,dns,httpprobe,n
 # With verbosity (flags BEFORE subcommand)
 python reconkit.py --debug run --target example.com
 python reconkit.py -v 3 run --target example.com --modules subdomains
+python reconkit.py run --target example.com --resume
+python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 ```
 
 Output: `~/.reconkit/output/example.com/`
@@ -366,9 +387,13 @@ Output: `~/.reconkit/output/example.com/`
 /target example.com
 /run example.com
 /run example.com --modules subdomains,dns,httpprobe
+/run example.com --resume
+/run --scope-all --modules subdomains,dns,httpprobe
 /quick example.com          # subdomains + dns + httpprobe
 /full example.com           # all modules
 /scan                       # interactive module picker (toggle numbers, Enter to run)
+/session set --cookie "sid=…"
+/inbox example.com
 ```
 
 ### Interactive `/scan` picker
@@ -658,6 +683,7 @@ Tab-completes slash names when readline is available.
 |---------|--------|
 | `/scope` | `/scope add\|list\|check [domain]` |
 | `/keys` | `/keys set\|list\|remove …` |
+| `/session` | `/session show\|set\|clear` — cookies/headers for authenticated recon |
 
 #### Recon pipeline
 
@@ -665,9 +691,13 @@ Tab-completes slash names when readline is available.
 |---------|--------|---------|
 | `/modules` | | List modules |
 | `/scan` | `/scan [target]` | Module picker |
-| `/run` | `/run [t] [--modules a,b\|all]` | Pipeline |
+| `/run` | `/run [t] [--modules a,b\|all] [--resume] [--scope-all]` | Pipeline |
 | `/quick` | `/quick [target]` | Fast trio |
 | `/full` | `/full [target]` | All modules |
+| `/har` | `/har import <file.har> [t]` | Import in-scope URLs + Cookie |
+| `/inbox` | `/inbox [target]` | C1+ hunter triage queue |
+| `/evidence` | `/evidence [t] [--id ID]` | Zip output + proofs |
+| `/wordlist-target` | `/wordlist-target [t]` | Target-specific wordlist |
 | `/outdir` | `/outdir [target]` | List result files |
 | `/findings` | `/findings [reindex\|summary] [t]` | Index |
 | `/dashboard` | `/dashboard [--port N] [--no-browser]` | Web UI |
@@ -717,7 +747,8 @@ or run `/findings reindex` â€” **no need to stop/restart the dashboard serv
 ```bash
 python recon_dashboard.py
 python recon_dashboard.py --port 8787 --no-browser
-python reconkit.py dashboard --host 0.0.0.0 --port 8787
+python reconkit.py dashboard --host 127.0.0.1 --port 8787
+python reconkit.py dashboard --host 0.0.0.0 --port 8787   # VM / LAN
 
 # shell (blocks until Ctrl+C)
 /dashboard
@@ -725,8 +756,8 @@ python reconkit.py dashboard --host 0.0.0.0 --port 8787
 /dashboard --host 127.0.0.1    # localhost only
 ```
 
-**Bind default: `0.0.0.0`** (all interfaces) so a dashboard in a **VM** is
-reachable from the **Windows host**.
+**Bind default: `127.0.0.1`** (localhost only). Use `--host 0.0.0.0` when the
+dashboard runs in a **VM** and you browse from the **Windows host**.
 
 | Where you browse | URL |
 |------------------|-----|
@@ -738,7 +769,7 @@ if the host cannot connect.
 
 | UI area | What you do |
 |---------|-------------|
-| **Recon / Proofs / Graph / Insights** | Findings, proofs, attack-path graph, severity/module charts |
+| **Scan / Findings / Proofs / Graph / Insights** | Live modules, findings (C1+), proofs, attack-path graph, charts |
 | Targets | Click one target or ALL (applies to all tabs) |
 | KPIs (Recon) | Records, targets, critical / high / medium, proof count |
 | KPIs (Proofs) | Total, confirmed, needs_manual, not_exploitable, errors |
@@ -749,7 +780,7 @@ if the host cannot connect.
 | **Reindex** | Force re-parse output **without restarting the server** |
 | **program:** badge | Active BB scoring profile |
 
-### Typography & evidence console (Bridge UI)
+### Typography & evidence console
 
 | Surface | Style |
 |---------|--------|
@@ -779,6 +810,7 @@ Hard-refresh the browser (`Ctrl+F5`) after upgrading so `app.css?v=8` / `app.js?
 | GET | `/api/stats/charts?target=` | Severity/module/score/proof bar-chart data |
 | GET | `/api/program` | Active BB program profile + list |
 | GET | `/api/file?target=&path=` | Text preview of output file |
+| GET | `/api/inbox?target=` | Hunter C1+ triage queue + suggested prove technique |
 | POST | `/api/reindex` | Force full rebuild from disk (no process restart) |
 
 ### Program profiles & Graph (v3.0)
@@ -798,12 +830,12 @@ Hard-refresh the browser (`Ctrl+F5`) after upgrading so `app.css?v=8` / `app.js?
 #   "allow_sqli_boolean": true
 ```
 
-Dashboard tabs: **Recon** Â· **Proofs** Â· **Graph** (drag nodes) Â· **Insights** (bars).
+Dashboard tabs: **Scan** · **Findings** (C1+ by default) · **Inbox** · **Proofs** · **Graph** · **Insights**.
 
-**Security:** default bind is **`0.0.0.0`** (LAN/VM access). Any machine that can
-reach the VM IP on port 8787 can see recon data. Restrict with the host/VM
-firewall, use an isolated network, or pass `--host 127.0.0.1` for localhost-only.
-Do **not** port-forward this UI to the public internet.
+**Security:** default bind is **`127.0.0.1`**. `--host 0.0.0.0` is LAN/VM access —
+any machine that can reach that IP on port 8787 can see recon data and start
+scoped scans. Restrict with the host/VM firewall. Do **not** port-forward this
+UI to the public internet.
 
 ---
 
@@ -1821,6 +1853,11 @@ Policy file: `config/exploit_policy.json` (`max_risk_class: safe`).
 | `nuclei_recheck` | nuclei / vuln rows | Match local nuclei artifacts + light GET |
 | `takeover_fingerprint` | CNAME / takeover rows | DNS + provider body fingerprints |
 | `ssrf_canary_review` | SSRF rows | Classify evidence; **no** metadata re-probe |
+| `jwt_inspect` | JWT-shaped token | Decode header/payload only (no cracking) |
+| `cors_origin` | CORS candidates | Origin canary; confirm ACAO + credentials |
+| `graphql_typename` | GraphQL URL | POST `{__typename}` only |
+| `redirect_canary` | Redirect candidates | Bounce to OAST or `.invalid` |
+| `idor_session_diff` | IDOR-shaped URL | GET with cookie A vs B (`/session`) |
 
 ### 19.3 CLI
 
@@ -2059,13 +2096,20 @@ Full design notes: **[skills/README.md](skills/README.md)** Â· **[skills/SKILL
 | Inline help | `/` Â· `/help` Â· `/<cmd> -h` | No |
 | **Live slash autocomplete** | type `/…` Â· contextual `--modules` / keys / providers | No |
 | **Safe prove / validate** | `/prove` Â· `recon_prove.py` | No |
+| **Auth session** | `/session` · `reconkit.py session` | No |
+| **HAR import** | `/har import` | No |
+| **Hunter inbox** | `/inbox` · dashboard **INBOX** · `/api/inbox` | No |
+| **Evidence ZIP** | `/evidence` | No |
+| **Resume / scope-all** | `/run --resume` · `/run --scope-all` | No |
 | Session target | `/target` | No |
 | Output listing | `/outdir` | No |
 | Agent report | `/agent` → `agent_report.md` | **Yes** |
 
-**Detection-only modules:** subdomains, dns, httpprobe, tls, crawl, js, params,
-content, xss, sqli, ssrf_ssti, nuclei, cloud, screenshots  
-(see Â§8 for descriptions).
+**Detection-only modules:** subdomains, permute, dns, ports, httpprobe, tls,
+wellknown, crawl, js, jsintel, params, apis, content, bypass403, gfextra,
+xss, sqli, ssrf_ssti, redirect, cors, graphql, nuclei, cloud, takeover_plus,
+osint, gitrecon, screenshots  
+(see §8 and [HUNTER.md](HUNTER.md)).
 
 ---
 
@@ -2089,6 +2133,19 @@ Under `~/.reconkit/output/<target>/`:
 | `nuclei_*.txt` | nuclei |
 | `cloud_assets.json`, `open_s3_buckets.txt` | cloud |
 | `screenshots/` | screenshots |
+| `permute_resolved.txt` | permute |
+| `ports.txt`, `ports_http.txt` | ports |
+| `waf_detected.txt` | httpprobe |
+| `wellknown.txt` | wellknown |
+| `js_intel.json` | jsintel |
+| `api_urls.txt`, `idor_candidates.txt` | apis |
+| `bypass403.txt` | bypass403 |
+| `redirect_hits.txt`, `cors_candidates.txt`, `graphql_endpoints.txt` | redirect / cors / graphql |
+| `takeover_plus.txt` | takeover_plus |
+| `osint.txt` | osint |
+| `git_urls.txt` | gitrecon |
+| `wordlist_target.txt` | `/wordlist-target` |
+| `evidence_*.zip` | `/evidence` |
 | `agent_state.json`, `agent_report.md` | `/agent` |
 | `report_draft.md` | `/report` |
 | `critic_review.md` | `/critic` |
@@ -2102,6 +2159,7 @@ Also:
 | `~/.reconkit/history/<target>/` | Snapshots for `/diff` |
 | `~/.reconkit/logs/debug.log` | Tool stderr every run |
 | `~/.reconkit/notes/` | Optional notes for `/tips` |
+| `~/.reconkit/session.json` | Auth cookies/headers (`/session`; never commit) |
 | `skills/*/SKILL.md` | Agent skill packs (repo; not under `~/.reconkit`) |
 
 ---
@@ -2114,8 +2172,12 @@ Also:
 python reconkit.py checkenv|setup|verify|wordlists|modules
 python reconkit.py scope add|list|check …
 python reconkit.py keys set|list|remove …
-python reconkit.py run --target T [--modules a,b|all]
+python reconkit.py run --target T [--modules a,b|all] [--resume] [--scope-all]
 python reconkit.py [-v 0-3|--debug] run --target T
+python reconkit.py session show|set|clear …
+python reconkit.py har --target T --file path.har
+python reconkit.py evidence --target T [--id ID]
+python reconkit.py wordlist-target --target T
 python reconkit.py shell [--target T]
 python reconkit.py dashboard [--host H] [--port P] [--no-browser] [--no-refresh]
 python reconkit.py findings [summary|reindex] [target]
@@ -2160,7 +2222,7 @@ python recon_agents.py run --target T --provider anthropic --model claude-sonnet
 ### recon_dashboard
 
 ```bash
-python recon_dashboard.py [--host 0.0.0.0] [--port 8787] [--no-browser] [--no-refresh]
+python recon_dashboard.py [--host 127.0.0.1] [--port 8787] [--no-browser] [--no-refresh]
 # from Windows host when UI runs in VM: http://<VM_IP>:8787/
 # UI: Helvetica Neue/Inter Â· evidence: JetBrains Mono #1a1d24
 ```
@@ -2262,6 +2324,43 @@ Ordered hunt with phase-by-phase copy-paste:
 - **[WORKFLOW.md](WORKFLOW.md)** â€” full hunt from setup → prove → graph → report  
 - **[AGENTS.md](AGENTS.md)** â€” LLM / skills / program / prove quick start  
 - **[skills/README.md](skills/README.md)** Â· **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** â€” skill suite  
-- **[ROADMAP.md](ROADMAP.md)** â€” implemented vs still open  
+- **[HUNTER.md](HUNTER.md)** — hunter extras (session, HAR, inbox, extra modules)  
+- **[ROADMAP.md](ROADMAP.md)** — implemented vs still open  
 
 Happy (authorized) hunting.
+
+---
+
+## 28. Hunter extras
+
+See **[HUNTER.md](HUNTER.md)** for the full hunter/OSE walkthrough (tiers 1–4).
+
+Quick path:
+
+```text
+/scope add example.com
+/session set --cookie "sid=…"                 # optional authenticated recon
+/har import ~/Downloads/app.har example.com   # optional browser export
+/run example.com --modules all
+# or resume after a stop:
+/run example.com --resume
+/findings reindex
+/inbox example.com
+/prove queue example.com
+/prove run example.com --technique cors_origin
+/evidence example.com
+/dashboard   # SCAN · FINDINGS · INBOX · PROOFS · GRAPH · INSIGHTS
+```
+
+Multi-root programs:
+
+```text
+/run --scope-all --modules subdomains,dns,httpprobe
+```
+
+Two-account IDOR canary (your objects only):
+
+```text
+/session set --cookie "userA=…" --cookie-b "userB=…"
+/prove run example.com --technique idor_session_diff
+```

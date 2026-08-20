@@ -8,6 +8,7 @@ Every user-facing operation the toolkit supports, with **CLI** and **shell** exa
 | **[WORKFLOW.md](WORKFLOW.md)** | Ordered hunt: setup → recon → prove → graph → agents → report |
 | **[USAGE.md](USAGE.md)** | Architecture, configs, modules, skills, troubleshooting |
 | **[AGENTS.md](AGENTS.md)** | LLM / skills / program / prove quick start |
+| **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
 | **[skills/README.md](skills/README.md)** | Skill suite + C0–C4 confidence model |
 
 **Project root:** `the Reconkit project root`  
@@ -35,6 +36,7 @@ Every user-facing operation the toolkit supports, with **CLI** and **shell** exa
 16. [Playbooks & background jobs](#16-playbooks--background-jobs)
 17. [Plugins](#17-plugins)
 18. [Help discovery](#18-help-discovery)
+19. [Hunter extras (session, HAR, inbox, extra modules)](#19-hunter-extras-session-har-inbox-extra-modules)
 
 ---
 
@@ -235,18 +237,31 @@ python reconkit.py modules
 | Module | Role |
 |--------|------|
 | `subdomains` | Passive / API subdomain enum |
+| `permute` | Capped DNS permutations (alterx/dnsgen → dnsx) |
 | `dns` | dnsx + CNAME takeover candidates |
-| `httpprobe` | httpx alive / tech |
+| `ports` | In-scope naabu connect-scan + httpx |
+| `httpprobe` | httpx alive / tech (session headers; WAF → stealth) |
 | `tls` | tlsx certs / JARM |
-| `crawl` | katana / gau / wayback … → URLs |
+| `wellknown` | robots / sitemap / security.txt / OpenID |
+| `crawl` | katana / gau / wayback … → in-scope URLs |
 | `js` | JS URLs + secret/endpoint regex |
+| `jsintel` | Sourcemaps, hidden routes, API paths, lib versions |
 | `params` | unfurl + arjun |
+| `apis` | OpenAPI / GraphQL / IDOR-shaped URLs |
 | `content` | sensitive paths + ffuf |
+| `bypass403` | Header/path 401/403 probes (no spray) |
+| `gfextra` | gf redirect / lfi / interestingparams |
 | `xss` | gf + kxss + dalfox candidates |
 | `sqli` | detection canaries |
 | `ssrf_ssti` | metadata SSRF probe + SSTI canary |
-| `nuclei` | templates |
+| `redirect` | Open-redirect canary (OAST or `.invalid`) |
+| `cors` | CORS ACAO reflection check |
+| `graphql` | `{__typename}` endpoint detect (no schema dump) |
+| `nuclei` | CVE / takeover / misconfig + tech-tagged pack |
 | `cloud` | cloud refs + open S3 list check |
+| `takeover_plus` | package.json / dangling JS CDN 404s |
+| `osint` | Shodan/Censys **this hostname only** |
+| `gitrecon` | GitHub/GitLab URLs + optional trufflehog |
 | `screenshots` | gowitness |
 
 ### 6.2 run (full or partial)
@@ -258,6 +273,8 @@ python reconkit.py run --target example.com
 # Selected modules (comma-separated, no spaces)
 python reconkit.py run --target example.com --modules subdomains,dns,httpprobe
 python reconkit.py run --target example.com --modules xss,sqli,ssrf_ssti,nuclei
+python reconkit.py run --target example.com --resume
+python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 python reconkit.py -v 3 run --target example.com --modules subdomains
 ```
 
@@ -268,9 +285,12 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 /run example.com --modules subdomains,dns,httpprobe
 /run example.com --modules all
 /run example.com --modules nuclei
+/run example.com --resume                 # skip stages whose output already exists
+/run --scope-all --modules subdomains,dns,httpprobe
 /run example.com --fg                     # foreground (blocks shell; live spinner)
 /run example.com --modules subdomains,    # Tab → module list after --modules
 /pause Â· /resume Â· /stop Â· /jobs
+/session show · /har import · /inbox · /evidence
 /run -h
 ```
 
@@ -325,6 +345,7 @@ Needs `pip install prompt_toolkit` for **LIVE** autocomplete (matches above the 
 | `/target` | `/target example.com` Â· `/t` Â· `/target` (clear/show) |
 | `/exit` | `/exit` Â· `/quit` Â· `/q` |
 | `/rate` | `/rate` Â· `/rate stealth` Â· `/rate normal` Â· `/rate aggressive` Â· `/polite show` |
+| `/session` | `/session show` Â· `/session set --cookie "…"` Â· `/session set --cookie-b "…"` Â· `/session clear` |
 
 ### 7.3 Live autocomplete
 
@@ -479,7 +500,12 @@ python reconkit.py prove techniques
 | `nuclei_recheck` | Local nuclei artifact + light GET |
 | `takeover_fingerprint` | DNS/HTTP fingerprints only |
 | `ssrf_canary_review` | Evidence review; OAST if `oast_base_url` set |
-| `sqli_boolean` | One true/false pair â€” only if `allow_sqli_boolean: true` |
+| `sqli_boolean` | One true/false pair — only if `allow_sqli_boolean: true` |
+| `jwt_inspect` | Decode JWT header/payload only (no cracking) |
+| `cors_origin` | Origin canary; confirm ACAO + credentials |
+| `graphql_typename` | POST `{__typename}` only (no schema dump) |
+| `redirect_canary` | Bounce to OAST or `.invalid` host |
+| `idor_session_diff` | GET same URL with cookie A vs B (set `/session`) |
 
 ### 10.3 queue
 
@@ -617,7 +643,9 @@ Evidence panels, source previews, and other â€œconsoleâ€ blocks use the
 
 | Control | Action | Example |
 |---------|--------|---------|
-| **Recon** | Findings table + filters | Filter module=`nuclei`, notable only |
+| **Scan** | Live module tiles | Play/pause via `/pause` `/stop` |
+| **Findings** | Findings table + filters | Filter module=`nuclei`, notable only |
+| **Inbox** | C1+ hunter triage + suggested prove technique | Same as `/inbox` · `GET /api/inbox` |
 | **Proofs** | Validation proofs | Status=`confirmed`, technique=`xss_reflect` |
 | **Graph** | Attack-path force graph | Min score 40+, drag nodes, click detail |
 | **Insights** | Bar charts | Severity mix, top modules, score buckets, proof status |
@@ -679,6 +707,9 @@ curl -s "http://127.0.0.1:8787/api/diff?target=example.com"
 # File preview
 curl -s "http://127.0.0.1:8787/api/file?target=example.com&path=subdomains.txt"
 
+# Hunter inbox (C1+ triage)
+curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
+
 # Force reindex
 curl -s -X POST http://127.0.0.1:8787/api/reindex
 ```
@@ -697,7 +728,8 @@ curl -s -X POST http://127.0.0.1:8787/api/reindex
 | GET | `/api/diff?target=` |
 | GET | `/api/file?target=&path=` |
 | GET | `/api/modules` |
-| POST | `/api/reindex` Â· `/api/refresh` |
+| GET | `/api/inbox` · `/api/hunter` |
+| POST | `/api/reindex` · `/api/refresh` |
 
 ---
 
@@ -1018,15 +1050,17 @@ Writes `critic_review.md`. Skills (fp-eval + triage-gate + exploit-prove) inject
 | Playbook | Modules (summary) |
 |----------|-------------------|
 | `quick` | subdomains, dns, httpprobe |
-| `takeover-first` | subdomains, dns, httpprobe |
-| `js-deep` | httpprobe, crawl, js, params |
-| `api-surface` | httpprobe, crawl, params, content, nuclei |
-| `vuln-pass` | xss, sqli, ssrf_ssti, nuclei, cloud |
-| `content-light` | httpprobe, content |
+| `takeover-first` | subdomains, dns, httpprobe, takeover_plus |
+| `js-deep` | httpprobe, crawl, js, jsintel, params |
+| `api-surface` | crawl + jsintel + apis + graphql + cors + nuclei |
+| `vuln-pass` | xss, sqli, ssrf_ssti, redirect, cors, graphql, nuclei, cloud |
+| `content-light` | httpprobe, wellknown, content, bypass403 |
 | `full` | all |
-| `passive` | subdomains, dns, httpprobe, tls, crawl |
-| `ports-hint` | discovery set (no naabu yet) |
-| `prove-prep` | surface for later `/prove` |
+| `passive` | subdomains, dns, httpprobe, tls, wellknown, crawl |
+| `ports-hint` | subdomains, dns, ports, httpprobe, tls |
+| `auth-surface` | crawl + jsintel + apis + bypass403 (set `/session` first) |
+| `hunter` | permute, ports, wellknown, jsintel, apis, bypass403, gf extras, takeover+ |
+| `prove-prep` | surface for later `/prove` (incl. redirect/cors/graphql) |
 
 ### 16.2 background jobs + progress
 
@@ -1087,7 +1121,66 @@ python recon_shell.py -h
 /prove -h
 /program -h
 /graph -h
+/session -h
+/inbox -h
 ```
+
+---
+
+## 19. Hunter extras (session, HAR, inbox, extra modules)
+
+Full walkthrough: **[HUNTER.md](HUNTER.md)**.
+
+### 19.1 Auth session
+
+```bash
+python reconkit.py session show
+python reconkit.py session set --cookie "sid=abc" --header "Authorization: Bearer …"
+python reconkit.py session set --cookie-b "sid=other"
+python reconkit.py session clear
+```
+
+```text
+/session
+/session set --cookie "sid=abc"
+/session set --cookie-b "sid=other" --header "Authorization: Bearer x"
+/session clear
+```
+
+File: `~/.reconkit/session.json` (chmod 600, never commit). Account B is for
+`/prove run --technique idor_session_diff` only.
+
+### 19.2 HAR, evidence, target wordlist
+
+```bash
+python reconkit.py har --target example.com --file capture.har
+python reconkit.py wordlist-target --target example.com
+python reconkit.py evidence --target example.com
+python reconkit.py evidence --target example.com --id <finding_id>
+```
+
+```text
+/har import capture.har example.com
+/wordlist-target example.com
+/evidence example.com
+/inbox example.com
+```
+
+### 19.3 Resume and multi-scope
+
+```bash
+python reconkit.py run --target example.com --resume
+python reconkit.py run --target example.com --force
+python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
+```
+
+```text
+/run example.com --resume
+/run --scope-all --modules subdomains,dns,httpprobe
+```
+
+`--resume` skips a module when its primary output already exists. `--force`
+overrides that. `--scope-all` iterates every root in `~/.reconkit/scope.txt`.
 
 ---
 

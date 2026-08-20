@@ -1,7 +1,4 @@
-/* RECONKIT v3.0.0 — Starfleet Bridge console
- * Mission replay inspired by HF "Anatomy of a Frontier Lab Agent Intrusion"
- * Modules = starships on a multi-phase mission
- */
+/* RECONKIT dashboard */
 
 const state = {
   view: "mission",
@@ -10,6 +7,7 @@ const state = {
   severity: "",
   type: "",
   notable: "",
+  confidence: "C1",
   q: "",
   limit: 100,
   offset: 0,
@@ -80,10 +78,11 @@ function setView(name) {
   state.view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   document.querySelectorAll(".btab").forEach((b) => b.classList.remove("active"));
-  // ids: viewMission, viewRecon, viewProofs, viewGraph, viewInsights
+  // ids: viewMission, viewRecon, viewInbox, viewProofs, viewGraph, viewInsights
   const map = {
     mission: "viewMission",
     recon: "viewRecon",
+    inbox: "viewInbox",
     proofs: "viewProofs",
     graph: "viewGraph",
     insights: "viewInsights",
@@ -96,6 +95,7 @@ function setView(name) {
   if (name !== "mission") stopMissionPoll();
   if (name === "mission") loadMission();
   if (name === "recon") loadRecon();
+  if (name === "inbox") loadInbox();
   if (name === "proofs") loadProofs();
   if (name === "graph") loadGraph();
   if (name === "insights") loadInsights();
@@ -126,7 +126,7 @@ async function loadTargets() {
     };
     ul.appendChild(li);
   }
-  $("targetCount").textContent = `${n} sector(s)`;
+  $("targetCount").textContent = `${n} target(s)`;
   if (!state.target) $("btnAllTargets").classList.add("active");
 }
 
@@ -183,10 +183,10 @@ function renderLiveTracker(m) {
   $("missionTitle").textContent = m.codename || "Live phase tracker";
   $("missionKicker").textContent = active
     ? `Live · ${m.target_label || "target"} · ${m.message || "scanning"}`
-    : `Tracker · ${m.target_label || "fleet-wide"} · start /run to watch phases`;
+    : `Tracker · ${m.target_label || "all targets"} · start a scan to watch phases`;
 
   $("missionPills").innerHTML = [
-    `<span class="mpill">${esc(m.target_label || "FLEET")}</span>`,
+    `<span class="mpill">${esc(m.target_label || "all")}</span>`,
     `<span class="mpill">${s.phases_complete ?? 0} / ${s.phases_total ?? 0} phases</span>`,
     `<span class="mpill">${s.signals_total ?? 0} signals</span>`,
     `<span class="mpill">${s.pct ?? 0}%</span>`,
@@ -237,10 +237,10 @@ function renderLiveTracker(m) {
     pill.textContent = st === "PAUSED" ? "SCAN PAUSED" : "SCAN LIVE";
   } else if (st === "COMPLETE") {
     pill.className = "alert-pill green";
-    pill.textContent = "MISSION COMPLETE";
+    pill.textContent = "SCAN COMPLETE";
   } else {
     pill.className = "alert-pill green";
-    pill.textContent = "CONDITION GREEN";
+    pill.textContent = "IDLE";
   }
 }
 
@@ -311,7 +311,7 @@ function updateLiveKpis(m) {
   const s = m.summary || {};
   $("kpiActions").textContent = String(s.phases_complete ?? 0);
   $("kpiActionsSub").textContent =
-    `of ${s.phases_total ?? 0} in this mission · ${s.pct ?? 0}%`;
+    `of ${s.phases_total ?? 0} in this scan · ${s.pct ?? 0}%`;
   if (m.active && m.current_module) {
     $("kpiPhase").textContent = m.current_module;
     const tool = m.current_tool || s.current_tool || "";
@@ -349,7 +349,7 @@ function shipSvgFor(s, size) {
 }
 
 function renderLogos(_m) {
-  // Compact cyber brand — no spacedock / ship art
+  // Compact brand
   if ($("logoWordmark")) {
     $("logoWordmark").innerHTML = `
       <div class="reconkit-fallback">RECONKIT</div>
@@ -370,7 +370,7 @@ function renderFleet(m, activePhase) {
   const root = $("fleetBoard");
   if (!root) return;
   root.innerHTML = (m.fleet || []).map((s) => {
-    const eng = s.status === "engaged" ? "engaged" : "";
+    const eng = (s.status === "engaged" || s.status === "active") ? "engaged" : "";
     const act = activePhase === s.id ? "active" : "";
     return `<div class="ship-card ${eng} ${act}" data-phase="${esc(s.id)}">
       <div class="ship-card-main">
@@ -442,6 +442,7 @@ async function loadRecon() {
   if (state.type) params.set("type", state.type);
   if (state.notable) params.set("notable", state.notable);
   if (state.q) params.set("q", state.q);
+  if (state.confidence) params.set("min_confidence", state.confidence);
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
 
@@ -472,6 +473,7 @@ async function loadRecon() {
   $("findingsBody").innerHTML = rows.map((r) => `
     <tr data-id="${esc(r.id)}">
       <td><span class="${sevClass(r.severity)}">${esc(r.severity)}</span></td>
+      <td>${esc(r.confidence || "C0")}</td>
       <td>${esc(r.module)}</td>
       <td>${esc(r.ftype)}</td>
       <td>${esc(stripAnsi(r.title))}</td>
@@ -495,6 +497,37 @@ async function loadRecon() {
       `;
     };
   });
+}
+
+async function loadInbox() {
+  const params = new URLSearchParams();
+  if (state.target) params.set("target", state.target);
+  params.set("limit", "50");
+  try {
+    const data = await api(`/api/inbox?${params}`);
+    const rows = data.items || [];
+    if ($("inboxMeta")) $("inboxMeta").textContent = `${data.count ?? rows.length} items`;
+    if ($("inboxSession")) {
+      $("inboxSession").textContent =
+        `${data.session || "no session"} · C1+ notable, ranked for triage. Suggested prove technique on the right.`;
+    }
+    const body = $("inboxBody");
+    if (!body) return;
+    body.innerHTML = rows.map((r) => `
+      <tr>
+        <td>${esc(r.confidence || "")}</td>
+        <td>${esc(r.severity || "")}</td>
+        <td>${esc(r.module || "")}</td>
+        <td>${esc((r.title || "").slice(0, 48))}</td>
+        <td title="${esc(r.asset || "")}">${esc((r.asset || "").slice(0, 56))}</td>
+        <td>${esc(r.score ?? "")}</td>
+        <td>${esc(r.technique || "manual")}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="7" class="muted">Inbox empty — run recon + $ reindex. Set /session for authenticated diffs.</td></tr>`;
+  } catch (e) {
+    const body = $("inboxBody");
+    if (body) body.innerHTML = `<tr><td colspan="7">${esc(e.message)}</td></tr>`;
+  }
 }
 
 async function loadProofs() {
@@ -1101,6 +1134,7 @@ async function refreshAll() {
   await loadTargets();
   if (state.view === "mission") await loadMission();
   else if (state.view === "recon") await loadRecon();
+  else if (state.view === "inbox") await loadInbox();
   else if (state.view === "proofs") await loadProofs();
   else if (state.view === "graph") await loadGraph();
   else if (state.view === "insights") await loadInsights();
@@ -1125,20 +1159,44 @@ function wire() {
     state.severity = $("fltSeverity").value;
     state.type = $("fltType").value;
     state.notable = $("fltNotable").value;
+    state.confidence = ($("fltConfidence") && $("fltConfidence").value) || "C1";
     state.q = $("fltQuery").value;
     state.offset = 0;
     loadRecon();
   };
   $("btnClear").onclick = () => {
     state.module = state.severity = state.type = state.notable = state.q = "";
+    state.confidence = "C1";
     $("fltModule").value = "";
     $("fltSeverity").value = "";
     $("fltType").value = "";
     $("fltNotable").value = "";
+    if ($("fltConfidence")) $("fltConfidence").value = "C1";
     $("fltQuery").value = "";
     state.offset = 0;
     loadRecon();
   };
+  const postCtl = async (path) => {
+    const res = await fetch(path, { method: "POST", cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      alert(data.error || res.statusText || "request failed");
+      return;
+    }
+    loadMission({ quiet: true });
+  };
+  if ($("btnQuick")) {
+    $("btnQuick").onclick = () => {
+      if (!state.target) {
+        alert("Select an in-scope target in the list first.");
+        return;
+      }
+      postCtl(`/api/run?target=${encodeURIComponent(state.target)}&modules=quick`);
+    };
+  }
+  if ($("btnPause")) $("btnPause").onclick = () => postCtl("/api/control?action=pause");
+  if ($("btnResume")) $("btnResume").onclick = () => postCtl("/api/control?action=resume");
+  if ($("btnStop")) $("btnStop").onclick = () => postCtl("/api/control?action=stop");
   $("btnPrev").onclick = () => {
     state.offset = Math.max(0, state.offset - state.limit);
     loadRecon();

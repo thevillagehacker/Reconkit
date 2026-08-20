@@ -1,14 +1,6 @@
-"""ASCII art for console banner + optional dashboard assets (v3.0.0).
-
-Console banner: cyberwarfare theme (pure ASCII, red/black friendly).
-Per-module names remain available for phase headers / fleet roster.
-"""
+"""ASCII banner + per-module labels for the console and dashboard."""
 
 from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# Cyberwarfare console banner
-# ---------------------------------------------------------------------------
 
 RECONKIT_WORDMARK = r"""
  ____  _____ ____ ___  _   _ _  _____ _____
@@ -18,63 +10,63 @@ RECONKIT_WORDMARK = r"""
 |_| \_\_____\____\___/|_| \_|_|\_\___| |_|
 """.strip("\n")
 
-# Compact cyberwarfare frame (no spacedock / no starships)
 CYBER_BANNER = r"""
   .--------------------------------------------------------------.
-  |  [//]  CYBERWARFARE  OPS  NODE                               |
-  |  >_  passive recon  ·  detection only  ·  authorized scope   |
-  |  [####------]  channel:SECURE  ·  mode:STEALTH               |
+  |  RECONKIT  ·  authorized recon                               |
+  |  passive + detection canaries  ·  no exploit frameworks      |
   '--------------------------------------------------------------'
 """.strip("\n")
 
 CYBER_SCAN_LINES = [
-    "  > syncing threat intel bus...",
+    "  > loading config...",
     "  > scope gate online",
-    "  > sensor mesh armed",
-    "  > ready for orders  ·  type /help",
+    "  > ready  ·  type /help",
 ]
 
-# API compat — empty / minimal so UI can skip large dock art
 FLAGSHIP = ""
-SPACEDOCK = ""  # removed from console + default UI
+SPACEDOCK = ""
 SPACEDOCK_MINI: list[str] = []
 SPACEDOCK_FRAMES: list[list[str]] = [[]]
-STARFLEET_DELTA = ""
-STAR_TREK_WORDMARK = RECONKIT_WORDMARK
-
-# ---------------------------------------------------------------------------
-# Module → unit name (phase headers / roster — not hull ASCII)
-# ---------------------------------------------------------------------------
-
-MODULE_SHIP_META: dict[str, tuple[str, str]] = {
-    "subdomains": ("NODE PATHFINDER", "Scout"),
-    "dns": ("NODE NAVIGATOR", "Science"),
-    "httpprobe": ("NODE SENSOR", "Probe"),
-    "tls": ("NODE CIPHER", "Escort"),
-    "crawl": ("NODE SPIDER", "Explorer"),
-    "js": ("NODE ARCHIVE", "Intel"),
-    "params": ("NODE KEYMASTER", "Ops"),
-    "content": ("NODE DIG", "Survey"),
-    "xss": ("NODE MIRROR", "Tactical"),
-    "sqli": ("NODE ORACLE", "Tactical"),
-    "ssrf_ssti": ("NODE WORMHOLE", "Tactical"),
-    "nuclei": ("NODE STRIKE", "Battleship"),
-    "cloud": ("NODE NEBULA", "Explorer"),
-    "screenshots": ("NODE VIEWSCREEN", "Support"),
-    "pipeline": ("OPS COMMAND", "Flag"),
-    "default": ("NODE RECON", "Utility"),
+# Formal recon labels (kept as MODULE_SHIP_META for older imports)
+MODULE_META: dict[str, tuple[str, str]] = {
+    "subdomains": ("Subdomain enum", "passive"),
+    "permute": ("DNS permutations", "passive"),
+    "dns": ("DNS records", "passive"),
+    "ports": ("Port probe", "active"),
+    "httpprobe": ("HTTP probe", "active"),
+    "tls": ("TLS fingerprint", "active"),
+    "wellknown": ("Well-known paths", "discovery"),
+    "crawl": ("URL crawl", "discovery"),
+    "js": ("JavaScript", "discovery"),
+    "jsintel": ("JS intel", "discovery"),
+    "params": ("Parameters", "discovery"),
+    "apis": ("API surface", "discovery"),
+    "content": ("Content discovery", "discovery"),
+    "bypass403": ("403 bypass", "detection"),
+    "gfextra": ("gf extras", "discovery"),
+    "xss": ("XSS canaries", "detection"),
+    "sqli": ("SQLi canaries", "detection"),
+    "ssrf_ssti": ("SSRF / SSTI", "detection"),
+    "redirect": ("Open redirect", "detection"),
+    "cors": ("CORS", "detection"),
+    "graphql": ("GraphQL", "detection"),
+    "nuclei": ("Nuclei templates", "detection"),
+    "cloud": ("Cloud assets", "detection"),
+    "takeover_plus": ("Takeover extras", "detection"),
+    "osint": ("Scoped OSINT", "passive"),
+    "gitrecon": ("Git recon", "passive"),
+    "screenshots": ("Screenshots", "visual"),
+    "pipeline": ("Pipeline", "control"),
+    "default": ("Recon", "utility"),
 }
-
-# No multi-line hull art on console (kept empty for API callers)
-MODULE_SHIP_ART: dict[str, str] = {k: "" for k in MODULE_SHIP_META}
+MODULE_SHIP_META = MODULE_META
+MODULE_SHIP_ART: dict[str, str] = {k: "" for k in MODULE_META}
 
 
 def ship_lines(module: str) -> list[str]:
-    key = (module or "default").lower().strip()
-    art = MODULE_SHIP_ART.get(key, "")
-    return art.splitlines() if art else []
+    return []
 
 
 def ship_meta(module: str) -> tuple[str, str]:
     key = (module or "default").lower().strip()
-    return MODULE_SHIP_META.get(key, MODULE_SHIP_META["default"])
+    return MODULE_META.get(key, MODULE_META["default"])
