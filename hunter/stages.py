@@ -166,10 +166,16 @@ def stage_ports(target: str, outdir: Path) -> None:
 def stage_wellknown(target: str, outdir: Path, alive_file: Path) -> None:
     rk = _rk()
     rk.step("Well-known / robots / sitemap / security.txt", phase="wellknown")
-    if not rk.which("httpx") or not alive_file.exists():
-        rk.warn("httpx/alive missing; skipping wellknown.")
+    if not rk.which("httpx"):
+        rk.warn("httpx missing; skipping wellknown.")
         return
-    hosts = rk._first_tokens(alive_file)[: rk._host_cap(15)]
+    hosts = rk._first_tokens(alive_file)[: rk._host_cap(15)] if alive_file.exists() else []
+    if not hosts:
+        rk.warn(
+            "alive.txt empty — seeding wellknown with the target host. "
+            "Run httpprobe first for full coverage."
+        )
+        hosts = [target]
     hits: list[str] = []
     for host in hosts:
         rk._rate_delay()

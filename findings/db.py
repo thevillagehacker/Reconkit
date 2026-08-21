@@ -123,6 +123,21 @@ def replace_index(payload: dict[str, Any]) -> Path:
     return DB_PATH
 
 
+def list_modules() -> list[str]:
+    """Distinct module names from the SQLite index (dashboard /api/modules)."""
+    if not DB_PATH.exists():
+        return []
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT module FROM findings "
+            "WHERE module IS NOT NULL AND module != '' ORDER BY module"
+        )
+        return [str(r[0]) for r in rows if r[0]]
+    finally:
+        conn.close()
+
+
 def meta() -> dict[str, str]:
     if not DB_PATH.exists():
         return {}

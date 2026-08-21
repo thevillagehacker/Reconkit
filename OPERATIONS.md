@@ -151,6 +151,7 @@ python reconkit.py wordlists
 ```bash
 python reconkit.py scope add example.com
 # type: yes
+python reconkit.py scope add example.com --yes    # skip prompt (automation / SSH)
 ```
 
 ```text

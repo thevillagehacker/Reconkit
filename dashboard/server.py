@@ -555,6 +555,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 offset=offset,
             )
             total = stats["total"]
+            # Default hides C0 inventory. If that empties the page, show C0
+            # rather than a blank dashboard (common for dns/httpprobe-only runs).
+            confidence_fallback = ""
+            if total == 0 and min_conf == "C1" and not conf and not notable:
+                min_conf = ""
+                rows, stats = query_store(
+                    target=ft, module=fm, severity=fs, ftype=fty, q=fq,
+                    notable=None, min_score=min_score,
+                    confidence=None, min_confidence=None,
+                    limit=limit, offset=offset,
+                )
+                total = stats["total"]
+                if total:
+                    confidence_fallback = "C0"
             # Clamp offset so filters never return an empty page due to old pagination
             if offset >= total and total > 0:
                 offset = 0
@@ -584,6 +598,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "min_score": min_score if min_score is not None else "",
                     "min_confidence": min_conf,
                     "confidence": conf,
+                    "confidence_fallback": confidence_fallback,
                 },
                 "output_fingerprint": idx.get("output_fingerprint"),
                 "generated_at": idx.get("generated_at"),
@@ -626,11 +641,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/modules":
-            idx = _get_index(force=force)
-            mods = sorted({
-                f.get("module", "other")
-                for f in (idx.get("findings") or [])
-            })
+            mods: list[str] = []
+            try:
+                from findings.db import list_modules
+                mods = list_modules()
+            except Exception:
+                idx = _get_index(force=force)
+                mods = sorted({
+                    f.get("module", "other")
+                    for f in (idx.get("findings") or [])
+                    if f.get("module")
+                })
+            if not mods:
+                try:
+                    from reconkit import ALL_MODULES
+                    mods = list(ALL_MODULES)
+                except Exception:
+                    mods = []
             self._send_json({"modules": mods})
             return
 

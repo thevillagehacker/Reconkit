@@ -76,7 +76,11 @@ def list_all_proof_targets() -> list[str]:
         return []
     found = []
     for tdir in OUTPUT_DIR.iterdir():
-        if tdir.is_dir() and (tdir / "proofs").is_dir():
+        pdir = tdir / "proofs"
+        if not tdir.is_dir() or not pdir.is_dir():
+            continue
+        has_json = any(p.name != "proofs_index.json" for p in pdir.glob("*.json"))
+        if has_json:
             found.append(tdir.name)
     return sorted(found)
 

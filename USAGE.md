@@ -262,6 +262,7 @@ To run `subfinder` yourself in a terminal, permanently add those dirs:
 
 ```bash
 python reconkit.py scope add example.com          # type yes to confirm authorization
+python reconkit.py scope add example.com --yes    # skip prompt (automation / SSH)
 python reconkit.py scope add "*.example.com"      # wildcard OK
 python reconkit.py scope list
 python reconkit.py scope check example.com

@@ -143,7 +143,28 @@ def _user_scripts_dir() -> Path:
 
 
 USER_SCRIPTS_DIR = _user_scripts_dir()
-EXTRA_PATH_DIRS = [GO_BIN_DIR, CARGO_BIN_DIR, USER_SCRIPTS_DIR]
+EXTRA_PATH_DIRS = [
+    GO_BIN_DIR,
+    CARGO_BIN_DIR,
+    USER_SCRIPTS_DIR,
+    Path("/usr/local/go/bin"),
+    Path("/usr/lib/go/bin"),
+]
+
+
+def bootstrap_tool_path() -> None:
+    """Put Go/Cargo/user-script dirs on PATH for this process (and children)."""
+    parts = [str(p) for p in EXTRA_PATH_DIRS if p.exists()]
+    if not parts:
+        return
+    prefix = os.pathsep.join(parts)
+    cur = os.environ.get("PATH", "")
+    if prefix not in cur.split(os.pathsep):
+        os.environ["PATH"] = prefix + os.pathsep + cur
+    os.environ.setdefault("GOPATH", str(GOPATH_DIR))
+
+
+bootstrap_tool_path()
 
 # --- Tool inventories, matching every tool named in the recon notes -------- #
 
@@ -948,10 +969,29 @@ def _echo_cmd(cmd: list) -> None:
     except Exception:
         pass
     if VERBOSE >= VERBOSE_NORMAL:
-        print(_c(f"    $ {' '.join(str(c) for c in cmd)}", Colors.GRAY))
+        shown: list[str] = []
+        hide_next = False
+        for c in cmd:
+            s = str(c)
+            if hide_next:
+                shown.append("<redacted>")
+                hide_next = False
+                continue
+            if s in ("-key", "--key", "--token", "--api-key"):
+                shown.append(s)
+                hide_next = True
+                continue
+            shown.append(s)
+        print(_c(f"    $ {' '.join(shown)}", Colors.GRAY))
 
 
 def which(binary: str) -> str | None:
+    # Kali packages /usr/bin/amass as a wrapper that `sudo`s libpostal data.
+    # That hangs non-interactive runs. Prefer the real binary when present.
+    if binary == "amass":
+        real = Path("/usr/lib/amass/amass")
+        if real.is_file() and os.access(real, os.X_OK):
+            return str(real)
     found = shutil.which(binary, path=os.environ.get("PATH", ""))
     if found:
         return found
@@ -1270,6 +1310,13 @@ def cmd_checkenv(_args) -> None:
         path = which(tool)
         if path:
             ok(f"{tool} -> {path}")
+        elif tool == "go" and any(
+            (GO_BIN_DIR / b).exists() for b in ("subfinder", "httpx", "nuclei")
+        ):
+            warn(
+                f"go compiler not on PATH, but {GO_BIN_DIR} already has recon binaries. "
+                "Scans can run. Add /usr/local/go/bin to PATH to install/update tools."
+            )
         else:
             fail(f"{tool} not found. Install from: {install_url}")
             if tool != "cargo":
@@ -1707,6 +1754,12 @@ def load_secrets_env() -> None:
             continue
         if key:
             os.environ.setdefault(key, value)
+    # chaos historically reads PDCP_API_KEY; some builds also honor CHAOS_KEY.
+    if os.environ.get("PDCP_API_KEY") and not os.environ.get("CHAOS_KEY"):
+        os.environ["CHAOS_KEY"] = os.environ["PDCP_API_KEY"]
+    if os.environ.get("CHAOS_KEY") and not os.environ.get("PDCP_API_KEY"):
+        os.environ["PDCP_API_KEY"] = os.environ["CHAOS_KEY"]
+    bootstrap_tool_path()
 
 
 def _lock_down_secrets_file() -> None:
@@ -1873,14 +1926,21 @@ def cmd_scope(args) -> None:
         write_config()
 
     if args.scope_action == "add":
-        prompt = (
-            f"Confirm you have EXPLICIT WRITTEN AUTHORIZATION to test "
-            f"'{args.domain}' (bug bounty scope / signed pentest agreement / "
-            f"your own infrastructure). Type 'yes' to confirm: "
-        )
-        confirm = input(_c(prompt, Colors.BOLD, Colors.YELLOW))
+        if getattr(args, "yes", False):
+            confirm = "yes"
+        else:
+            prompt = (
+                f"Confirm you have EXPLICIT WRITTEN AUTHORIZATION to test "
+                f"'{args.domain}' (bug bounty scope / signed pentest agreement / "
+                f"your own infrastructure). Type 'yes' to confirm: "
+            )
+            try:
+                confirm = input(_c(prompt, Colors.BOLD, Colors.YELLOW))
+            except EOFError:
+                confirm = ""
         if confirm.strip().lower() != "yes":
             print(_c("Not confirmed. Domain was NOT added.", Colors.YELLOW))
+            print("Hint: python3 reconkit.py scope add <domain> --yes")
             return
         with open(SCOPE_FILE, "a") as f:
             f.write(args.domain.strip() + "\n")
@@ -1960,8 +2020,9 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
         ("assetfinder", ["-subs-only", target]),
         ("findomain", ["-t", target, "-q"]),
     ]
-    if os.environ.get("PDCP_API_KEY") or os.environ.get("CHAOS_KEY"):
-        tools.insert(2, ("chaos", ["-d", target, "-silent"]))
+    chaos_key = os.environ.get("PDCP_API_KEY") or os.environ.get("CHAOS_KEY")
+    if chaos_key:
+        tools.insert(2, ("chaos", ["-key", chaos_key, "-d", target, "-silent"]))
     if os.environ.get("GITHUB_TOKEN") and which("github-subdomains"):
         tools.append(("github-subdomains", ["-d", target]))
     # Passive web sources also shown on the checklist
@@ -3721,6 +3782,10 @@ def build_parser() -> argparse.ArgumentParser:
     scope_sub = scope_parser.add_subparsers(dest="scope_action", required=True)
     add_p = scope_sub.add_parser("add", help="Add an authorized target")
     add_p.add_argument("domain")
+    add_p.add_argument(
+        "--yes", action="store_true",
+        help="Skip the interactive authorization confirmation (automation / SSH).",
+    )
     scope_sub.add_parser("list", help="List authorized targets")
     check_p = scope_sub.add_parser("check", help="Check if a target is in scope")
     check_p.add_argument("domain")
