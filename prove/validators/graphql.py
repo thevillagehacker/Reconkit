@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import ssl
-import urllib.error
-import urllib.request
 from typing import Any
+
+from prove.http_util import http_post
 
 
 def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
@@ -19,30 +18,45 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     if not url:
         return {"status": "needs_manual", "evidence": "No GraphQL URL.", "impact_note": ""}
     body = json.dumps({"query": "{__typename}"}).encode()
-    req = urllib.request.Request(
+    timeout = float(policy.get("request_timeout_sec") or 12)
+    ua = str(policy.get("user_agent") or "reconkit-prove/3.0")
+    r = http_post(
         url,
-        data=body,
-        headers={"Content-Type": "application/json",
-                 "User-Agent": str(policy.get("user_agent") or "reconkit-prove/3.0")},
-        method="POST",
+        body,
+        timeout=timeout,
+        user_agent=ua,
+        extra_headers={"Content-Type": "application/json"},
+        merge_session=True,
     )
-    try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=float(policy.get("request_timeout_sec") or 12), context=ctx) as resp:
-            raw = resp.read(4000).decode("utf-8", errors="replace")
-            code = getattr(resp, "status", None) or resp.getcode()
-    except urllib.error.HTTPError as e:
-        raw = e.read(4000).decode("utf-8", errors="replace") if e.fp else ""
-        code = e.code
-    except Exception as e:
-        return {"status": "error", "evidence": str(e), "impact_note": ""}
+    raw = r.get("body") or ""
+    code = r.get("status")
+    if code is None:
+        return {"status": "error", "evidence": r.get("error") or "request failed", "impact_note": ""}
     ev = f"url={url}\nHTTP {code}\nbody={raw[:400]}"
-    if "__typename" in raw or '"data"' in raw:
+    parsed: Any = None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        data = parsed.get("data")
+        if isinstance(data, dict) and "__typename" in data:
+            return {
+                "status": "confirmed",
+                "evidence": ev,
+                "impact_note": "Endpoint accepts GraphQL. Map schema privately; do not dump data here.",
+            }
+        errs = parsed.get("errors")
+        if isinstance(errs, list) and errs:
+            return {
+                "status": "needs_manual",
+                "evidence": ev,
+                "impact_note": "GraphQL error payload — endpoint exists; check auth.",
+            }
+    if "__typename" in raw:
         return {
             "status": "confirmed",
             "evidence": ev,
             "impact_note": "Endpoint accepts GraphQL. Map schema privately; do not dump data here.",
         }
-    if "error" in raw.lower() and "graphql" in raw.lower():
-        return {"status": "needs_manual", "evidence": ev, "impact_note": "GraphQL-like errors."}
     return {"status": "not_exploitable", "evidence": ev, "impact_note": ""}

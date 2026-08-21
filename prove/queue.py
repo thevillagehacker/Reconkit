@@ -40,11 +40,13 @@ def _map_technique(finding: dict[str, Any]) -> str | None:
         return "cors_origin"
     if mod == "graphql" or "graphql" in title or "graphql" in source:
         return "graphql_typename"
-    if mod == "redirect" or "redirect" in title or "redirect" in source:
+    if mod == "redirect" or "redirect_hits" in source:
         return "redirect_canary"
-    if mod in ("apis", "idor") or "idor" in title or "idor" in source:
+    if mod == "idor" or "idor" in title or "idor_candidates" in source:
         return "idor_session_diff"
-    if "takeover" in source or mod == "takeover_plus":
+    if mod == "takeover_plus":
+        return None
+    if "takeover" in source:
         return "takeover_fingerprint"
     return None
 
@@ -69,6 +71,7 @@ def build_queue(
     max_n = limit if limit is not None else int(pol.get("max_per_run") or 40)
 
     findings: list[dict[str, Any]] = []
+    used_store = False
     try:
         from findings.indexer import query_store
         findings, _st = query_store(
@@ -78,9 +81,10 @@ def build_queue(
             limit=max(max_n * 8, 80),
             offset=0,
         )
+        used_store = True
     except Exception:
         findings = []
-    if not findings:
+    if not findings and not used_store:
         payload = load_index()
         findings = list(payload.get("findings") or [])
         if target:
@@ -93,6 +97,8 @@ def build_queue(
     queue: list[dict[str, Any]] = []
     for f in findings:
         tech = _map_technique(f)
+        if tech == "sqli_boolean" and not pol.get("allow_sqli_boolean"):
+            continue
         if tech and tech in allowed:
             queue.append({
                 "finding_id": f.get("id"),
@@ -110,8 +116,13 @@ def build_queue(
                 "evidence": (f.get("evidence") or "")[:400],
                 "finding": f,
             })
-        elif include_unmapped and (f.get("module") in ("xss", "sqli", "ssrf_ssti", "nuclei", "dns")
-                                     or f.get("ftype") == "vuln"):
+        elif include_unmapped and (
+            f.get("module") in (
+                "xss", "sqli", "ssrf_ssti", "nuclei", "dns",
+                "cors", "graphql", "redirect", "apis", "bypass403", "takeover_plus",
+            )
+            or f.get("ftype") == "vuln"
+        ):
             queue.append({
                 "finding_id": f.get("id"),
                 "target": f.get("target"),

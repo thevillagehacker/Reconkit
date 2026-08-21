@@ -812,10 +812,13 @@ class ReconShell:
     def cmd_scope(self, args: list[str]) -> None:
         action = args[0].lower()
         if action == "add":
-            if len(args) < 2:
-                rk.fail("usage: /scope add <domain>")
+            rest = args[1:]
+            yes = any(a in ("--yes", "-y") for a in rest)
+            rest = [a for a in rest if a not in ("--yes", "-y")]
+            if not rest:
+                rk.fail("usage: /scope add <domain> [--yes]")
                 return
-            rk.cmd_scope(self._namespace(scope_action="add", domain=args[1]))
+            rk.cmd_scope(self._namespace(scope_action="add", domain=rest[0], yes=yes))
         elif action == "list":
             rk.cmd_scope(self._namespace(scope_action="list"))
         elif action == "check":

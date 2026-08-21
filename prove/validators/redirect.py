@@ -7,6 +7,11 @@ from typing import Any
 
 from prove.http_util import http_get, inject_query_marker
 
+_REDIRECT_PARAMS = [
+    "next", "url", "redirect", "redirect_uri", "return", "returnUrl", "return_url",
+    "dest", "destination", "continue", "rurl", "target", "goto", "redir",
+]
+
 
 def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     blob = str(item.get("asset") or "") + " " + str(item.get("evidence") or "")
@@ -19,41 +24,26 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         marker = bounce + "/rk-redirect"
     else:
         marker = "https://rk-redirect-check.invalid/"
-    test = inject_query_marker(url, marker)
-    # follow_redirects is urllib default — we need Location of first hop.
-    import ssl
-    import urllib.error
-    import urllib.request
-    req = urllib.request.Request(
+    test = inject_query_marker(url, marker, prefer_params=_REDIRECT_PARAMS)
+    timeout = float(policy.get("request_timeout_sec") or 12)
+    ua = str(policy.get("user_agent") or "reconkit-prove/3.0")
+    r = http_get(
         test,
-        headers={"User-Agent": str(policy.get("user_agent") or "reconkit-prove/3.0")},
-        method="GET",
+        timeout=timeout,
+        user_agent=ua,
+        merge_session=True,
+        follow_redirects=False,
     )
-    loc = ""
-    code = None
-    opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
-    # Don't follow: HTTPError on 3xx isn't raised if handler follows. Use urlopen without follow:
-    class NoRedir(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *a, **k):
-            return None
-    try:
-        ctx = ssl.create_default_context()
-        opener = urllib.request.build_opener(NoRedir, urllib.request.HTTPSHandler(context=ctx))
-        resp = opener.open(req, timeout=float(policy.get("request_timeout_sec") or 12))
-        code = getattr(resp, "status", None) or resp.getcode()
-        loc = resp.headers.get("Location") or resp.geturl() or ""
-        body = resp.read(1500).decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        code = e.code
-        loc = e.headers.get("Location") or ""
-        body = ""
-        try:
-            body = e.read(1500).decode("utf-8", errors="replace")
-        except Exception:
-            pass
-    except Exception as e:
-        return {"status": "error", "evidence": str(e), "impact_note": ""}
-    ev = f"test={test}\nHTTP {code}\nLocation={loc}\n"
+    if r.get("status") is None and r.get("error"):
+        return {"status": "error", "evidence": r.get("error") or "", "impact_note": ""}
+    loc = (
+        (r.get("headers") or {}).get("Location")
+        or (r.get("headers") or {}).get("location")
+        or r.get("final_url")
+        or ""
+    )
+    body = r.get("body") or ""
+    ev = f"test={test}\nHTTP {r.get('status')}\nLocation={loc}\n"
     if marker.rstrip("/") in (loc or "") or "rk-redirect" in (loc or "") or "rk-redirect" in body:
         return {
             "status": "confirmed",

@@ -15,7 +15,10 @@ TIERS = ("C0", "C1", "C2", "C3", "C4")
 STATUSES = ("inventory", "candidate", "needs_prove", "confirmed", "false_positive", "manual")
 
 _INVENTORY_TYPES = {"subdomain", "host", "url", "param", "tls", "other"}
-_CANDIDATE_MODULES = {"xss", "sqli", "ssrf_ssti", "nuclei"}
+_CANDIDATE_MODULES = {
+    "xss", "sqli", "ssrf_ssti", "nuclei",
+    "cors", "graphql", "redirect", "bypass403", "apis", "takeover_plus",
+}
 _CANDIDATE_TYPES = {"vuln", "secret", "cloud"}
 
 

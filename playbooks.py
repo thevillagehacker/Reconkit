@@ -13,7 +13,7 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
     },
     "takeover-first": {
         "description": "Subdomains + DNS CNAME candidates + extra takeover surface + HTTP",
-        "modules": ["subdomains", "dns", "httpprobe", "takeover_plus"],
+        "modules": ["subdomains", "dns", "httpprobe", "crawl", "takeover_plus"],
     },
     "js-deep": {
         "description": "Live hosts → crawl → JS secrets + sourcemaps/routes + params",
@@ -21,7 +21,7 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
     },
     "api-surface": {
         "description": "API/OpenAPI/GraphQL harvest + IDOR-shaped params + CORS",
-        "modules": ["httpprobe", "crawl", "jsintel", "params", "apis", "graphql", "cors", "nuclei"],
+        "modules": ["httpprobe", "crawl", "js", "jsintel", "params", "apis", "graphql", "cors", "nuclei"],
     },
     "vuln-pass": {
         "description": "Detection pass: xss, sqli, ssrf/ssti, redirect, cors, graphql, nuclei, cloud",
@@ -51,9 +51,10 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
         "modules": ["httpprobe", "crawl", "js", "jsintel", "apis", "bypass403"],
     },
     "hunter": {
-        "description": "Hunter extras: permute, ports, well-known, JS intel, APIs, 403, gf extras, takeover+",
+        "description": "Hunter extras on a live surface: enum → permute/ports → crawl/JS intel → APIs/403/takeover+",
         "modules": [
-            "permute", "ports", "wellknown", "jsintel", "apis",
+            "subdomains", "permute", "dns", "ports", "httpprobe",
+            "wellknown", "crawl", "js", "jsintel", "apis",
             "bypass403", "gfextra", "redirect", "cors", "graphql", "takeover_plus",
         ],
     },

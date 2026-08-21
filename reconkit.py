@@ -2318,8 +2318,11 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
             (outdir / "waf_detected.txt").write_text("\n".join(wafs) + "\n", encoding="utf-8")
             warn(f"WAF fingerprints: {', '.join(wafs)} — consider /rate stealth")
             if _rate_profile() != "stealth" and "cloudflare" in wafs:
-                warn("Cloudflare-like WAF — dropping to stealth for remaining HTTP tools this process")
-                persist_rate_profile("stealth")
+                warn(
+                    "Cloudflare-like WAF — stealth for remaining tools this process only "
+                    "(does not rewrite ~/.reconkit/config.json; /rate stealth to persist)"
+                )
+                os.environ["RECON_RATE"] = "stealth"
     except Exception:
         pass
     if input_count and n / input_count < 0.2:
@@ -2637,8 +2640,9 @@ def stage_content_discovery(alive_file: Path, outdir: Path, wordlist: Path | Non
                 hp.advance(host)
             _rate_delay()
             # httpx -path expects stdin of hosts; feed one at a time to keep output attributable
+            from hunter.session import httpx_h_flags
             r = pipeline([["httpx", "-silent", "-mc", "200,204,301,302,401,403",
-                           "-path", ",".join(SENSITIVE_PATHS)]],
+                           "-path", ",".join(SENSITIVE_PATHS), *httpx_h_flags()]],
                          input_data=(host + "\n").encode())
             sensitive_hits.extend(r.decode(errors="ignore").splitlines())
         if hp:
@@ -2801,6 +2805,7 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
     if cl:
         cl.start_tool("error-canary")
     # httpx -ms is a literal substring, NOT a regex. Repeat the flag per needle.
+    from hunter.session import httpx_h_flags as _sqli_h
     errors = pipeline([
         ["qsreplace", "'"],
         ["httpx", "-silent",
@@ -2813,7 +2818,8 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
          "-ms", "syntax error",
          "-ms", "unclosed quotation",
          "-ms", "pg_query",
-         "-ms", "You have an error in your SQL"],
+         "-ms", "You have an error in your SQL",
+         *_sqli_h()],
     ], input_data=candidates)
     n_err = write_lines(outdir / "sqli_error_based.txt", errors)
     if cl:
@@ -2824,11 +2830,11 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
     # Differential: keep shapes that differ between true vs false payloads.
     # Treating every HTTP 200 after a true-payload as SQLi is a mass FP source.
     true_json = pipeline(
-        [["qsreplace", "1' AND '1'='1"], ["httpx", "-silent", "-json"]],
+        [["qsreplace", "1' AND '1'='1"], ["httpx", "-silent", "-json", *_sqli_h()]],
         input_data=candidates,
     )
     false_json = pipeline(
-        [["qsreplace", "1' AND '1'='2"], ["httpx", "-silent", "-json"]],
+        [["qsreplace", "1' AND '1'='2"], ["httpx", "-silent", "-json", *_sqli_h()]],
         input_data=candidates,
     )
     true_map = _httpx_json_by_shape(true_json)
@@ -2901,9 +2907,10 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
         if cl:
             cl.start_tool("ssrf-metadata")
         # AWS metadata read-only probe — detection only, no credential use.
+        from hunter.session import httpx_h_flags as _ssrf_h
         metadata_hits = pipeline([
             ["qsreplace", "http://169.254.169.254/latest/meta-data/"],
-            ["httpx", "-silent", "-match-string", "ami-id"],
+            ["httpx", "-silent", "-match-string", "ami-id", *_ssrf_h()],
         ], input_data=ssrf_candidates)
         n = write_lines(outdir / "ssrf_metadata_candidates.txt", metadata_hits)
         if cl:
@@ -2917,9 +2924,10 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
     if ssti_candidates.strip():
         if cl:
             cl.start_tool("ssti-math")
+        from hunter.session import httpx_h_flags as _ssti_h
         arithmetic_hits = pipeline([
             ["qsreplace", SSTI_CANARY],
-            ["httpx", "-silent", "-match-string", SSTI_EXPECTED],
+            ["httpx", "-silent", "-match-string", SSTI_EXPECTED, *_ssti_h()],
         ], input_data=ssti_candidates)
         arithmetic_hits = _ssti_baseline_filter(arithmetic_hits)
         n = write_lines(outdir / "ssti_candidates.txt", arithmetic_hits)
@@ -3037,6 +3045,11 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
     except Exception:
         checklist = None
 
+    try:
+        from hunter.session import httpx_h_flags as _nuc_h
+        sess_h = _nuc_h()
+    except Exception:
+        sess_h = []
     for (fname, extra_args), pack in zip(scans, pack_names):
         out_path = outdir / fname
         if checklist:
@@ -3050,6 +3063,7 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
                 "-c", str(rs.get("nuclei_conc") or 25),
             ]
             + extra_args
+            + sess_h
         )
         hits = 0
         try:
@@ -3086,8 +3100,8 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
                 checklist.finish_tool("tech", hits)
             else:
                 ok(f"nuclei tech tags {tags} -> {out_path} ({hits})")
-    except Exception:
-        pass
+    except Exception as e:
+        warn(f"nuclei tech-tag pack skipped: {e}")
     if checklist:
         checklist.stop(final_msg=f"Nuclei · {n_t} host(s)")
 
@@ -3349,8 +3363,18 @@ def cmd_run(args) -> None:
             fail("scope is empty — add authorized roots with: reconkit.py scope add <domain>")
             sys.exit(1)
         info(f"--scope-all: {len(roots)} authorized root(s)")
+        try:
+            from run_control import CONTROL
+            CONTROL.reset(label="run:scope-all")
+        except Exception:
+            CONTROL = None  # type: ignore
         for t in roots:
-            ns = argparse.Namespace(**{**vars(args), "target": t, "scope_all": False})
+            if CONTROL is not None and CONTROL.is_stopped():
+                warn("--scope-all: /stop honored — remaining roots skipped")
+                break
+            ns = argparse.Namespace(
+                **{**vars(args), "target": t, "scope_all": False, "_scope_all_child": True}
+            )
             cmd_run(ns)
         return
     if not target:
@@ -3388,7 +3412,12 @@ def cmd_run(args) -> None:
     info(f"verbosity={VERBOSE} ({VERBOSE_LABELS.get(VERBOSE, '?')}) · outdir={outdir}")
     try:
         from run_control import CONTROL
-        CONTROL.reset(label=f"run:{target}")
+        if getattr(args, "_scope_all_child", False):
+            if CONTROL.is_stopped():
+                warn(f"--scope-all: /stop honored, skipping {target}")
+                return
+        else:
+            CONTROL.reset(label=f"run:{target}")
     except Exception:
         pass
 

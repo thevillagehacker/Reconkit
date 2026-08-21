@@ -196,7 +196,15 @@ def stage_jsintel(target: str, outdir: Path, js_file: Path) -> None:
     js_urls = []
     if js_file.exists():
         js_urls = [ln.strip() for ln in js_file.read_text(errors="ignore").splitlines() if ln.strip()]
-    js_urls = [u for u in js_urls if rk.url_belongs_to_target(u, target)][: int(rk.rate_settings().get("js_cap") or 80)]
+    js_urls = [u for u in js_urls if rk.url_belongs_to_target(u, target)]
+    subjs = rk.which("subjs")
+    if subjs and (outdir / "urls.txt").exists():
+        r = rk.pipeline([["subjs"]], input_data=(outdir / "urls.txt").read_bytes())
+        extra = rk.filter_urls_to_target(r.decode(errors="ignore").splitlines(), target)
+        if extra:
+            js_urls = sorted(set(js_urls) | set(extra))
+            js_file.write_text("\n".join(js_urls) + "\n", encoding="utf-8")
+    js_urls = js_urls[: int(rk.rate_settings().get("js_cap") or 80)]
     curl = rk.which("curl")
     if not curl or not js_urls:
         rk.warn("no JS URLs or curl; skipping jsintel.")
@@ -220,13 +228,6 @@ def stage_jsintel(target: str, outdir: Path, js_file: Path) -> None:
             libs.add(f"{m.group(1).lower()}@{m.group(2)}")
         for m in _GITHUB_RE.finditer(body):
             github.add(m.group(0).rstrip(").,"))
-    subjs = rk.which("subjs")
-    if subjs and (outdir / "urls.txt").exists():
-        r = rk.pipeline([["subjs"]], input_data=(outdir / "urls.txt").read_bytes())
-        extra = rk.filter_urls_to_target(r.decode(errors="ignore").splitlines(), target)
-        if extra:
-            js_urls = sorted(set(js_urls) | set(extra))
-            js_file.write_text("\n".join(js_urls) + "\n", encoding="utf-8")
     payload = {
         "routes": sorted(routes)[:500],
         "api_paths": sorted(apis)[:500],
@@ -257,7 +258,22 @@ def stage_apis(target: str, outdir: Path, urls_file: Path) -> None:
     p = outdir / "api_paths.txt"
     if p.exists():
         extra = [ln.strip() for ln in p.read_text(errors="ignore").splitlines() if ln.strip()]
-    _write(rk, outdir / "api_urls.txt", sorted(set(api_urls))[:2000])
+    bases: list[str] = []
+    alive = outdir / "alive_urls.txt"
+    if alive.exists():
+        bases = [
+            b.rstrip("/") for b in rk._first_tokens(alive)[:15]
+            if str(b).startswith("http")
+        ]
+    for path in extra:
+        if not path.startswith("/"):
+            path = "/" + path
+        for b in bases:
+            u = b + path
+            if rk.url_belongs_to_target(u, target):
+                api_urls.append(u)
+    api_urls = sorted(set(api_urls))[:2000]
+    _write(rk, outdir / "api_urls.txt", api_urls)
     # IDOR-shaped params
     idor = [u for u in api_urls if re.search(r"(id=|user_id=|account_id=|uid=|org_id=)", u, re.I)]
     _write(rk, outdir / "idor_candidates.txt", idor[:500])
@@ -371,26 +387,16 @@ def stage_cors(target: str, outdir: Path, alive_file: Path) -> None:
     origin = "https://rk-cors-check.invalid"
     hits = []
     from prove.http_util import http_get
-    import urllib.request
-    import ssl
     for host in hosts:
         url = host if host.startswith("http") else f"https://{host}/"
         if not rk.url_belongs_to_target(url, target):
             continue
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"Origin": origin, "User-Agent": "reconkit-cors/3.0"},
-                method="GET",
-            )
-            ctx = ssl.create_default_context()
-            with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-                acao = resp.headers.get("Access-Control-Allow-Origin", "")
-                acac = resp.headers.get("Access-Control-Allow-Credentials", "")
-                if origin in acao or acao.strip() == "*":
-                    hits.append(f"{url}  ACAO={acao}  ACAC={acac}")
-        except Exception:
-            continue
+        r = http_get(url, timeout=8, extra_headers={"Origin": origin}, merge_session=True)
+        hdrs = r.get("headers") or {}
+        acao = hdrs.get("Access-Control-Allow-Origin") or hdrs.get("access-control-allow-origin") or ""
+        acac = hdrs.get("Access-Control-Allow-Credentials") or hdrs.get("access-control-allow-credentials") or ""
+        if origin in acao or acao.strip() == "*":
+            hits.append(f"{url}  ACAO={acao}  ACAC={acac}")
     n = _write(rk, outdir / "cors_candidates.txt", hits)
     rk.ok(f"cors: {n} reflected/* ACAO (confirm credentials + impact)")
 
@@ -412,8 +418,8 @@ def stage_graphql(target: str, outdir: Path, urls_file: Path) -> None:
             gq.append(base.rstrip("/") + "/graphql")
     gq = sorted(set(gq))[:40]
     hits = []
-    from prove.http_util import http_get
     q = '{"query":"{__typename}"}'
+    import urllib.error
     import urllib.request
     import ssl
     for url in gq:
@@ -428,12 +434,18 @@ def stage_graphql(target: str, outdir: Path, urls_file: Path) -> None:
             ctx = ssl.create_default_context()
             with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
                 body = resp.read(2000).decode("utf-8", errors="replace")
-                if "__typename" in body or "data" in body or "errors" in body:
+                if "__typename" in body or '"data"' in body or '"errors"' in body:
                     hits.append(f"{url}  HTTP {getattr(resp, 'status', resp.getcode())}  {body[:120].replace(chr(10), ' ')}")
-        except Exception as e:
-            # HTTPError 400 with graphql errors still counts
-            if "graphql" in str(e).lower():
-                hits.append(f"{url}  error={e}")
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read(2000).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            if "__typename" in body or '"errors"' in body or "graphql" in body.lower():
+                hits.append(f"{url}  HTTP {e.code}  {body[:120].replace(chr(10), ' ')}")
+        except Exception:
+            continue
     n = _write(rk, outdir / "graphql_endpoints.txt", hits)
     rk.ok(f"graphql: {n} responding endpoints (introspection not enabled by default)")
 

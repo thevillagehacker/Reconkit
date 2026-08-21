@@ -56,6 +56,9 @@ def import_har(har_path: str, target: str) -> dict[str, Any]:
     try:
         data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
         for e in (data.get("log") or {}).get("entries") or []:
+            u = ((e.get("request") or {}).get("url") or "").strip()
+            if not u.startswith("http") or not rk.url_belongs_to_target(u, target):
+                continue
             headers = (e.get("request") or {}).get("headers") or []
             for h in headers:
                 if str(h.get("name") or "").lower() == "cookie" and h.get("value"):
@@ -178,6 +181,7 @@ def scope_roots() -> list[str]:
 def build_inbox(*, target: str | None = None, limit: int = 40) -> dict[str, Any]:
     """Prioritized C1+ hunter inbox (findings + suggested prove technique)."""
     findings: list[dict[str, Any]] = []
+    used_store = False
     try:
         from findings.indexer import query_store
         findings, _st = query_store(
@@ -187,9 +191,10 @@ def build_inbox(*, target: str | None = None, limit: int = 40) -> dict[str, Any]
             limit=max(limit * 3, 60),
             offset=0,
         )
+        used_store = True
     except Exception:
         findings = []
-    if not findings:
+    if not findings and not used_store:
         try:
             from findings.store import load_index
             from findings.scoring import is_notable

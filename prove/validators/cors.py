@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlparse
 
 from prove.http_util import http_get
 
@@ -18,28 +17,21 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     if not url:
         return {"status": "needs_manual", "evidence": "No URL for CORS probe.", "impact_note": ""}
     origin = "https://rk-cors-check.invalid"
-    # stdlib GET with Origin — http_get doesn't set Origin; use urllib
-    import ssl
-    import urllib.request
-    req = urllib.request.Request(
+    timeout = float(policy.get("request_timeout_sec") or 12)
+    ua = str(policy.get("user_agent") or "reconkit-prove/3.0")
+    r = http_get(
         url,
-        headers={
-            "Origin": origin,
-            "User-Agent": str(policy.get("user_agent") or "reconkit-prove/3.0"),
-        },
-        method="GET",
+        timeout=timeout,
+        user_agent=ua,
+        extra_headers={"Origin": origin},
+        merge_session=True,
     )
-    acao = acac = ""
-    status = None
-    try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=float(policy.get("request_timeout_sec") or 12), context=ctx) as resp:
-            status = getattr(resp, "status", None) or resp.getcode()
-            acao = resp.headers.get("Access-Control-Allow-Origin") or ""
-            acac = resp.headers.get("Access-Control-Allow-Credentials") or ""
-    except Exception as e:
-        return {"status": "error", "evidence": str(e), "impact_note": ""}
-    ev = f"url={url}\nOrigin={origin}\nACAO={acao}\nACAC={acac}\nHTTP {status}"
+    if r.get("status") is None:
+        return {"status": "error", "evidence": r.get("error") or "request failed", "impact_note": ""}
+    hdrs = r.get("headers") or {}
+    acao = hdrs.get("Access-Control-Allow-Origin") or hdrs.get("access-control-allow-origin") or ""
+    acac = hdrs.get("Access-Control-Allow-Credentials") or hdrs.get("access-control-allow-credentials") or ""
+    ev = f"url={url}\nOrigin={origin}\nACAO={acao}\nACAC={acac}\nHTTP {r.get('status')}"
     if origin in acao and "true" in acac.lower():
         return {
             "status": "confirmed",

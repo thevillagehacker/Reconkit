@@ -29,13 +29,13 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         f"alg={alg}\nheader={json.dumps(hdr)[:400]}\npayload_keys={list((pay or {}).keys())[:20]}\n"
         f"notes={notes or ['decode-only']}"
     )
-    status = "needs_manual"
-    if alg.lower() == "none":
-        status = "confirmed"
     return {
-        "status": status,
+        "status": "needs_manual",
         "evidence": evidence,
-        "impact_note": "Inspect claims/kid/jku manually. Toolkit does not crack secrets.",
+        "impact_note": (
+            "Decode-only. alg=none in a token is a hint — do not treat as confirmed "
+            "until a request shows the server accepted it."
+        ),
         "meta": {"alg": alg, "header": hdr},
     }
 

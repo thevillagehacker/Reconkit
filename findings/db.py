@@ -81,6 +81,13 @@ def replace_index(payload: dict[str, Any]) -> Path:
             "INSERT INTO meta(k, v) VALUES(?, ?)",
             ("finding_count", str(payload.get("finding_count") or len(findings))),
         )
+        notable_n = payload.get("notable_count")
+        if notable_n is None:
+            notable_n = sum(1 for d in findings if d.get("notable"))
+        conn.execute(
+            "INSERT INTO meta(k, v) VALUES(?, ?)",
+            ("notable_count", str(int(notable_n or 0))),
+        )
         rows = []
         for d in findings:
             rows.append((
@@ -194,11 +201,16 @@ def slim_payload() -> dict[str, Any]:
         n = int(m.get("finding_count") or 0)
     except (TypeError, ValueError):
         n = 0
+    try:
+        notable_n = int(m.get("notable_count") or 0)
+    except (TypeError, ValueError):
+        notable_n = 0
     return {
         "version": "3.0.0",
         "generated_at": m.get("generated_at") or "",
         "finding_count": n,
         "record_count": n,
+        "notable_count": notable_n,
         "targets": load_targets(),
         "findings": [],
         "records": [],
@@ -291,7 +303,12 @@ def query_findings(
         offset = max(0, int(offset))
         rows = conn.execute(
             f"""SELECT * FROM findings {clause}
-                ORDER BY notable DESC, score DESC, severity ASC
+                ORDER BY notable DESC, score DESC,
+                  CASE LOWER(severity)
+                    WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2 WHEN 'low' THEN 3
+                    WHEN 'info' THEN 4 ELSE 5 END,
+                  title ASC
                 LIMIT ? OFFSET ?""",
             [*args, limit, offset],
         ).fetchall()

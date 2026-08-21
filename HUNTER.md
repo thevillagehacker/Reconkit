@@ -73,7 +73,7 @@ Set `oast_base_url` in `config/exploit_policy.json` for redirect/SSRF canaries.
 
 | Technique | Input | Action |
 |-----------|--------|--------|
-| `jwt_inspect` | JWT-shaped token in evidence | Decode header/payload only |
+| `jwt_inspect` | JWT-shaped token in evidence | Decode header/payload only (`alg=none` stays needs_manual) |
 | `cors_origin` | CORS candidate | Origin canary; confirm ACAO + credentials |
 | `graphql_typename` | GraphQL URL | POST `{__typename}` only |
 | `redirect_canary` | Redirect candidate | Bounce to OAST or `.invalid` |
@@ -138,8 +138,9 @@ subdomains → permute → dns → ports → httpprobe → tls → wellknown
 
 List descriptions anytime: `/modules` or `python reconkit.py modules`.
 
-Playbooks: `auth-surface`, `hunter`, `api-surface`, `js-deep`, `ports-hint`,
-`content-light`, `prove-prep`, `vuln-pass`, `takeover-first`.
+Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have inputs),
+`api-surface`, `js-deep`, `ports-hint`, `content-light`, `prove-prep`,
+`vuln-pass`, `takeover-first`.
 
 ---
 

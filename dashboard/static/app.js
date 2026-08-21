@@ -469,7 +469,9 @@ async function loadRecon() {
 
   const rows = rec.records || rec.findings || [];
   state.total = rec.total ?? rows.length;
-  $("reconPageInfo").textContent = `${state.offset + 1}–${state.offset + rows.length} / ${state.total}`;
+  const fb = rec.filters && rec.filters.confidence_fallback;
+  $("reconPageInfo").textContent = `${state.offset + 1}–${state.offset + rows.length} / ${state.total}`
+    + (fb ? ` · showing ${fb} inventory (no C1+)` : "");
   $("findingsBody").innerHTML = rows.map((r) => `
     <tr data-id="${esc(r.id)}">
       <td><span class="${sevClass(r.severity)}">${esc(r.severity)}</span></td>
@@ -521,7 +523,7 @@ async function loadInbox() {
         <td>${esc((r.title || "").slice(0, 48))}</td>
         <td title="${esc(r.asset || "")}">${esc((r.asset || "").slice(0, 56))}</td>
         <td>${esc(r.score ?? "")}</td>
-        <td>${esc(r.technique || "manual")}</td>
+        <td>${esc(r.technique || "—")}</td>
       </tr>
     `).join("") || `<tr><td colspan="7" class="muted">Inbox empty — run recon + $ reindex. Set /session for authenticated diffs.</td></tr>`;
   } catch (e) {

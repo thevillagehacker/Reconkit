@@ -598,7 +598,7 @@ def _parse_file(target: str, path: Path, rel: str, module: str) -> list[Finding]
             "redirect_hits.txt": ("redirect", "Open-redirect canary hit", "medium", "vuln"),
             "idor_candidates.txt": ("apis", "IDOR-shaped parameter URL", "medium", "vuln"),
             "takeover_plus.txt": ("takeover_plus", "Extra takeover candidate", "high", "vuln"),
-            "graphql_endpoints.txt": ("graphql", "GraphQL endpoint", "low", "other"),
+            "graphql_endpoints.txt": ("graphql", "GraphQL endpoint", "medium", "other"),
         }
         mod, title, sev, ftype = meta[name]
         for ln in lines:

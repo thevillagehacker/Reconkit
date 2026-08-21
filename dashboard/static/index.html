@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=3.15-hunter" />
+  <link rel="stylesheet" href="/app.css?v=3.16-fix" />
 </head>
 <body class="dash">
   <div class="atmosphere" aria-hidden="true">
@@ -269,7 +269,9 @@
                 <option value="">all</option>
                 <option value="confirmed">confirmed</option>
                 <option value="needs_manual">needs_manual</option>
-                <option value="rejected">rejected</option>
+                <option value="not_exploitable">not_exploitable</option>
+                <option value="false_positive">false_positive</option>
+                <option value="error">error</option>
               </select>
             </label>
             <button type="button" id="btnProofApply" class="btn primary">Apply</button>
@@ -339,7 +341,7 @@
     <span>v3.0.0 · reconkit</span>
   </footer>
 
-  <script src="/ships.js?v=3.15-hunter"></script>
-  <script src="/app.js?v=3.15-hunter"></script>
+  <script src="/ships.js?v=3.16-fix"></script>
+  <script src="/app.js?v=3.16-fix"></script>
 </body>
 </html>

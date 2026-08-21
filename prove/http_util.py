@@ -40,6 +40,36 @@ def inject_query_marker(url: str, marker: str, prefer_params: list[str] | None =
         return url
 
 
+def _merge_headers(
+    user_agent: str,
+    extra_headers: dict[str, str] | None,
+    *,
+    merge_session: bool,
+) -> dict[str, str]:
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/json,*/*",
+    }
+    if merge_session:
+        try:
+            from hunter.session import headers as sess_headers
+            for k, v in (sess_headers() or {}).items():
+                if k and v:
+                    headers[str(k)] = str(v)
+        except Exception:
+            pass
+    if extra_headers:
+        for k, v in extra_headers.items():
+            if k and v is not None:
+                headers[str(k)] = str(v)
+    return headers
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # noqa: ARG002
+        return None
+
+
 def http_get(
     url: str,
     *,
@@ -47,11 +77,13 @@ def http_get(
     user_agent: str = "reconkit-prove/3.0.0",
     max_bytes: int = 200_000,
     extra_headers: dict[str, str] | None = None,
+    merge_session: bool = True,
+    follow_redirects: bool = True,
 ) -> dict[str, Any]:
     """
-    GET url; return status, body snippet, headers summary, error.
-    TLS verification kept on; no redirects to other hosts beyond urllib default.
-    Merges hunter session cookies/headers when present (authenticated recon).
+    GET url; return status, body snippet, response headers, error.
+    TLS verification stays on. HTTP 4xx/5xx set status (not error).
+    merge_session=False skips hunter cookie A (use for IDOR account B).
     """
     result: dict[str, Any] = {
         "url": url,
@@ -59,44 +91,82 @@ def http_get(
         "body": "",
         "error": "",
         "final_url": url,
+        "headers": {},
     }
     if not url.lower().startswith(("http://", "https://")):
         result["error"] = "not an http(s) URL"
         return result
-    headers = {
-        "User-Agent": user_agent,
-        "Accept": "text/html,application/json,*/*",
-    }
-    try:
-        from hunter.session import headers as sess_headers
-        for k, v in (sess_headers() or {}).items():
-            if k and v:
-                headers[str(k)] = str(v)
-    except Exception:
-        pass
-    if extra_headers:
-        for k, v in extra_headers.items():
-            if k and v is not None:
-                headers[str(k)] = str(v)
-    req = urllib.request.Request(
-        url,
-        headers=headers,
-        method="GET",
-    )
+    headers = _merge_headers(user_agent, extra_headers, merge_session=merge_session)
+    req = urllib.request.Request(url, headers=headers, method="GET")
     ctx = ssl.create_default_context()
+    handlers: list[urllib.request.BaseHandler] = [urllib.request.HTTPSHandler(context=ctx)]
+    if not follow_redirects:
+        handlers.insert(0, _NoRedirect())
+    opener = urllib.request.build_opener(*handlers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        resp = opener.open(req, timeout=timeout)
+        try:
             result["status"] = getattr(resp, "status", None) or resp.getcode()
             result["final_url"] = resp.geturl()
+            result["headers"] = {str(k): str(v) for k, v in (resp.headers.items() if resp.headers else [])}
             raw = resp.read(max_bytes)
             result["body"] = raw.decode("utf-8", errors="replace")
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
     except urllib.error.HTTPError as e:
         result["status"] = e.code
+        result["headers"] = {str(k): str(v) for k, v in (e.headers.items() if e.headers else [])}
+        loc = (e.headers.get("Location") if e.headers else "") or ""
+        if loc:
+            result["final_url"] = loc
         try:
             result["body"] = e.read(max_bytes).decode("utf-8", errors="replace")
         except Exception:
             result["body"] = ""
-        result["error"] = f"HTTPError {e.code}"
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
+def http_post(
+    url: str,
+    data: bytes,
+    *,
+    timeout: float = 15.0,
+    user_agent: str = "reconkit-prove/3.0.0",
+    max_bytes: int = 200_000,
+    extra_headers: dict[str, str] | None = None,
+    merge_session: bool = True,
+) -> dict[str, Any]:
+    """POST bytes; HTTP 4xx still returns status/body (not error)."""
+    result: dict[str, Any] = {
+        "url": url,
+        "status": None,
+        "body": "",
+        "error": "",
+        "headers": {},
+    }
+    if not url.lower().startswith(("http://", "https://")):
+        result["error"] = "not an http(s) URL"
+        return result
+    headers = _merge_headers(user_agent, extra_headers, merge_session=merge_session)
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    ctx = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            result["status"] = getattr(resp, "status", None) or resp.getcode()
+            result["headers"] = {str(k): str(v) for k, v in (resp.headers.items() if resp.headers else [])}
+            result["body"] = resp.read(max_bytes).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        result["status"] = e.code
+        result["headers"] = {str(k): str(v) for k, v in (e.headers.items() if e.headers else [])}
+        try:
+            result["body"] = e.read(max_bytes).decode("utf-8", errors="replace")
+        except Exception:
+            result["body"] = ""
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"
     return result
