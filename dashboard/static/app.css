@@ -1084,5 +1084,12 @@ code {
 @media (max-width: 800px) {
   .dash-layout { grid-template-columns: 1fr; }
   .fleet-rail { max-height: 200px; }
-  .dash-tabs { display: none; }
 }
+
+/* Lite dashboard: no GPU animations / atmosphere */
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+}
+.atmosphere, .stars, .scan-veil, .vignette, .lcars-cap { display: none !important; }
+body.lite { background: var(--bg); }

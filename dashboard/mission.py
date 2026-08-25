@@ -371,13 +371,8 @@ def build_live_tracker(
     live = read_live()
     records = list(idx.get("findings") or idx.get("records") or [])
     tgt_filter = (target or live.get("target") or "").strip()
-    if not records:
-        try:
-            from findings.indexer import query_store
-            records, _st = query_store(target=tgt_filter or None, limit=2000, offset=0)
-        except Exception:
-            records = []
-    if tgt_filter:
+    # Do not query SQLite on the live poll path — that re-scans the corpus every few seconds.
+    if tgt_filter and records:
         tlow = tgt_filter.lower()
         records = [r for r in records if str(r.get("target") or "").lower() == tlow]
 

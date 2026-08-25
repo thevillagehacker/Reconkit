@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -916,12 +917,13 @@ def output_fingerprint(output_dir: Path | None = None) -> dict[str, Any]:
                 newest = max(newest, tdir.stat().st_mtime)
             except OSError:
                 pass
+            # One directory level only — do not walk screenshots/ trees on every poll.
             try:
-                for p in tdir.rglob("*"):
-                    if p.is_file():
+                with os.scandir(tdir) as it:
+                    for ent in it:
                         file_count += 1
                         try:
-                            newest = max(newest, p.stat().st_mtime)
+                            newest = max(newest, ent.stat().st_mtime)
                         except OSError:
                             pass
             except OSError:

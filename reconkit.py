@@ -992,13 +992,18 @@ def which(binary: str) -> str | None:
         real = Path("/usr/lib/amass/amass")
         if real.is_file() and os.access(real, os.X_OK):
             return str(real)
+    # Default PATH + PATHEXT on Windows (.exe/.bat). Extra dirs appended by bootstrap.
+    found = shutil.which(binary)
+    if found:
+        return found
     found = shutil.which(binary, path=os.environ.get("PATH", ""))
     if found:
         return found
     for extra_dir in EXTRA_PATH_DIRS:
-        candidate = extra_dir / (binary + (".exe" if IS_WINDOWS else ""))
-        if candidate.exists():
-            return str(candidate)
+        for name in ((binary + ".exe", binary) if IS_WINDOWS else (binary,)):
+            candidate = extra_dir / name
+            if candidate.is_file():
+                return str(candidate)
     return None
 
 
@@ -1260,10 +1265,32 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
+def write_utf8(path: Path, text: str) -> None:
+    """All scan artifacts are UTF-8, LF newlines (Windows-safe)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def write_host_list(path: Path, hosts) -> int:
+    """One hostname/URL per line, ANSI-stripped, unique, preserve order."""
+    seen: set[str] = set()
+    lines: list[str] = []
+    for h in hosts:
+        tok = strip_ansi(str(h)).strip()
+        if not tok:
+            continue
+        tok = tok.split()[0]
+        if tok not in seen:
+            seen.add(tok)
+            lines.append(tok)
+    write_utf8(path, "\n".join(lines) + ("\n" if lines else ""))
+    return len(lines)
+
+
 def write_lines(path: Path, data: bytes) -> int:
     text = strip_ansi(data.decode(errors="ignore"))
     lines = sorted(set(ln.strip() for ln in text.splitlines() if ln.strip()))
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    write_utf8(path, "\n".join(lines) + ("\n" if lines else ""))
     return len(lines)
 
 
@@ -2132,7 +2159,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
 
     collected = {h for h in collected if host_belongs_to_target(h, target_lower)}
     _maybe_filter_wildcard_dns(target, collected, outdir)
-    subs_file.write_text("\n".join(sorted(collected)) + ("\n" if collected else ""))
+    write_host_list(subs_file, sorted(collected))
     ok(f"{len(collected)} unique subdomains -> {subs_file}")
     return subs_file
 
@@ -2244,17 +2271,19 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
         cl.start_tool("dnsx-records")
     # Hosts that actually resolve (hunter: enum → resolve → httpx).
     resolved = pipeline([["dnsx", "-silent"]], input_data=subs_data)
-    resolved_b = strip_ansi_bytes(resolved)
-    (outdir / "resolved.txt").write_bytes(resolved_b)
+    n_res = write_host_list(
+        outdir / "resolved.txt",
+        strip_ansi(resolved.decode(errors="ignore")).splitlines(),
+    )
     records = pipeline([
         ["dnsx", "-silent", "-a", "-aaaa", "-cname", "-mx", "-ns", "-txt", "-resp"],
     ], input_data=subs_data)
-    n_rec = len([ln for ln in records.decode(errors="ignore").splitlines() if ln.strip()])
+    rec_text = strip_ansi(records.decode(errors="ignore"))
+    rec_lines = [ln.strip() for ln in rec_text.splitlines() if ln.strip()]
+    write_utf8(outdir / "dns_records.txt", "\n".join(rec_lines) + ("\n" if rec_lines else ""))
+    n_rec = len(rec_lines)
     if cl:
         cl.finish_tool("dnsx-records", n_rec)
-    # Always plain text (no color escapes) for indexer / dashboard.
-    (outdir / "dns_records.txt").write_bytes(strip_ansi_bytes(records))
-    n_res = len([ln for ln in resolved_b.decode(errors="ignore").splitlines() if ln.strip()])
     ok(f"{n_res} resolved hosts -> {outdir / 'resolved.txt'}")
     ok(f"DNS records -> {outdir / 'dns_records.txt'}")
 
@@ -2301,9 +2330,16 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
     from hunter.session import httpx_h_flags
     result = pipeline([
         ["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
-         "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()],
+         "-title", "-sc", "-td", "-fr", *httpx_h_flags()],
     ], input_data=probe_src.read_bytes())
-    alive_file.write_bytes(result)
+    if not result.strip():
+        # Older httpx builds use long flag names
+        result = pipeline([
+            ["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
+             "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()],
+        ], input_data=probe_src.read_bytes())
+    text = strip_ansi(result.decode("utf-8", errors="replace"))
+    write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
     _filter_wildcard_http(alive_file, outdir, outdir.name)
     write_clean_alive_urls(alive_file, outdir)
     n = len([ln for ln in alive_file.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()])
@@ -2349,14 +2385,16 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
     except Exception:
         cl = None
     result = pipeline([
-        ["tlsx", "-silent", "-json", "-so", "-expired",
-         "-self-signed", "-mismatched", "-tls-version", "-jarm"],
+        ["tlsx", "-silent", "-json", "-expired",
+         "-self-signed", "-mismatched", "-jarm"],
     ], input_data=hosts)
+    if not result.strip():
+        result = pipeline([["tlsx", "-silent", "-json"]], input_data=hosts)
     n = len([ln for ln in result.decode(errors="ignore").splitlines() if ln.strip()])
     if cl:
         cl.finish_tool("tlsx", n)
         cl.stop(final_msg=f"TLS · {len(host_list)} host(s)")
-    (outdir / "tls_recon.json").write_bytes(result)
+    write_utf8(outdir / "tls_recon.json", strip_ansi(result.decode("utf-8", errors="replace")))
     ok(f"TLS recon -> {outdir / 'tls_recon.json'}")
 
 
@@ -2398,10 +2436,15 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         clean_input = ("\n".join(hosts) + "\n").encode()
         from hunter.session import httpx_h_flags
         result = pipeline(
-            [["katana", "-silent", "-d", _katana_depth(), "-jc", "-kf", "all", *httpx_h_flags()]],
+            [["katana", "-silent", "-d", _katana_depth(), "-jc", *httpx_h_flags()]],
             input_data=clean_input,
         )
-        collected.update(result.decode(errors="ignore").splitlines())
+        if not result.strip():
+            result = pipeline(
+                [["katana", "-silent", "-d", _katana_depth()]],
+                input_data=clean_input,
+            )
+        collected.update(strip_ansi(result.decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("katana", len(collected) - before)
     else:
@@ -2463,7 +2506,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         err = (r.stderr or b"").decode(errors="ignore").lower()
         if r.returncode != 0 and ("unknown" in err or "flag" in err):
             r = run([gau, "--threads", "10", target], capture=True)
-        collected.update((r.stdout or b"").decode(errors="ignore").splitlines())
+        collected.update(strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("gau", len(collected) - before)
     else:
@@ -2478,7 +2521,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
             checklist.start_tool("waybackurls")
         before = len(collected)
         r = run([waybackurls, target], capture=True)
-        collected.update((r.stdout or b"").decode(errors="ignore").splitlines())
+        collected.update(strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("waybackurls", len(collected) - before)
     else:
@@ -2523,7 +2566,7 @@ def stage_js(urls_file: Path, outdir: Path) -> Path:
         u for u in urls
         if re.search(r"\.js(\?|$)", u) and url_belongs_to_target(u, target)
     })
-    js_file.write_text("\n".join(js_urls) + ("\n" if js_urls else ""))
+    write_utf8(js_file, "\n".join(js_urls) + ("\n" if js_urls else ""))
     ok(f"{len(js_urls)} JS files -> {js_file}")
 
     curl = which("curl")
@@ -2554,7 +2597,7 @@ def stage_js(urls_file: Path, outdir: Path) -> Path:
         hp.close()
 
     secrets_file = outdir / "js_secrets_and_endpoints.json"
-    secrets_file.write_text(json.dumps({k: sorted(v) for k, v in findings.items() if v}, indent=2))
+    write_utf8(secrets_file, json.dumps({k: sorted(v) for k, v in findings.items() if v}, indent=2))
     total = sum(len(v) for v in findings.values())
     ok(f"{total} candidate secrets/endpoints across {len([k for k,v in findings.items() if v])} "
        f"categories -> {secrets_file} (verify manually; these are pattern matches, not confirmed leaks)")
@@ -3131,7 +3174,7 @@ def stage_cloud(urls_file: Path, outdir: Path) -> None:
     gcp = sorted(set(re.findall(JS_SECRET_PATTERNS["gcp_buckets"], text)))
     firebase = sorted(set(re.findall(JS_SECRET_PATTERNS["firebase_urls"], text)))
     n_refs = len(s3) + len(azure) + len(gcp) + len(firebase)
-    (outdir / "cloud_assets.json").write_text(json.dumps(
+    write_utf8(outdir / "cloud_assets.json", json.dumps(
         {"s3": s3, "azure_blobs": azure, "gcp_buckets": gcp, "firebase": firebase}, indent=2))
     if cl:
         cl.finish_tool("extract-refs", n_refs)

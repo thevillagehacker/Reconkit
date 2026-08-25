@@ -299,11 +299,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path in ("/api/scan", "/api/mission", "/api/mission/live", "/api/tracker", "/api/run/live"):
-            # Live phase tracker (default). ?mode=replay keeps legacy action stream.
-            idx = _get_index(force=force)
+            # Live tracker reads live_mission.json only — do not rebuild the findings index.
             target = q("target")
             mode = (q("mode") or "live").strip().lower()
             if mode in ("replay", "playback", "legacy"):
+                idx = _get_index(force=force)
                 try:
                     max_a = int(q("max_actions") or "800")
                 except ValueError:
@@ -312,7 +312,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(build_mission(idx, target=target, max_actions=max_a))
             else:
                 from dashboard.mission import build_live_tracker
-                self._send_json(build_live_tracker(idx, target=target))
+                self._send_json(build_live_tracker({}, target=target))
             return
 
         if path in ("/api/scan/modules", "/api/mission/fleet", "/api/fleet"):

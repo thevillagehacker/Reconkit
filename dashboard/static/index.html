@@ -6,26 +6,14 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>RECONKIT</title>
   <meta name="theme-color" content="#0a0a0a" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=3.16-fix" />
+  <link rel="stylesheet" href="/app.css?v=3.17-lite" />
 </head>
-<body class="dash">
-  <div class="atmosphere" aria-hidden="true">
-    <div class="stars" id="stars"></div>
-    <div class="scan-veil"></div>
-    <div class="vignette"></div>
-  </div>
-
-  <!-- Top rail -->
+<body class="dash lite">
   <header class="dash-header">
-    <div class="lcars-cap left"></div>
     <div class="brand-block">
-      <div class="brand-mark" aria-hidden="true">◈</div>
       <div>
         <div class="brand-title">RECONKIT</div>
-        <div class="brand-sub" id="missionBanner">idle · no scan</div>
+        <div class="brand-sub" id="missionBanner">idle</div>
       </div>
     </div>
     <nav class="dash-tabs" role="tablist">
@@ -38,11 +26,8 @@
     </nav>
     <div class="header-actions">
       <span id="alertPill" class="alert-pill green">IDLE</span>
-      <span id="liveBadge" class="live-badge"><span class="dot"></span>LIVE OFF</span>
-      <button type="button" id="btnLive" class="btn ghost">Live</button>
-      <button type="button" id="btnRefresh" class="btn primary">$ reindex</button>
+      <button type="button" id="btnRefresh" class="btn primary">reindex</button>
     </div>
-    <div class="lcars-cap right"></div>
   </header>
 
   <main class="dash-layout">
@@ -62,61 +47,20 @@
     <section class="main-stage">
       <!-- ========== LIVE PHASE TRACKER ========== -->
       <div id="viewMission" class="view active">
-        <div class="mission-hero compact-hero">
-          <div class="logo-dock panel compact-dock" id="logoDock" aria-label="RECONKIT cyber ops">
-            <div class="logo-slot wordmark" id="logoWordmark"></div>
-            <div class="logo-slot flagship" id="logoFlagship" hidden></div>
-            <div class="logo-slot dock" id="logoDockArt" hidden></div>
-          </div>
-          <div>
-            <div class="mission-kicker" id="missionKicker">Live scan tracker</div>
-            <h1 class="mission-title" id="missionTitle">Scan progress</h1>
-            <p class="mission-lede">
-              Each tile is a recon module. Active runs highlight the current module and tool.
-              State file: <code>~/.reconkit/live_mission.json</code>
-            </p>
-          </div>
-          <div class="mission-meta-pills" id="missionPills">
-            <span class="mpill">—</span>
-          </div>
-        </div>
-
-        <!-- Live status strip -->
         <div class="live-strip panel" id="liveStrip">
           <div class="live-strip-main">
-            <span class="live-dot" id="liveDot"></span>
             <span class="live-status" id="liveStatusLabel">IDLE</span>
-            <span class="live-msg" id="liveMessage">waiting for /run …</span>
+            <span class="live-msg" id="liveMessage">waiting for /run</span>
           </div>
           <div class="live-strip-meta">
-            <span id="livePhaseFrac">0 / 0 phases</span>
-            <span id="liveHostFrac">hosts —</span>
+            <span id="livePhaseFrac">0 / 0</span>
             <span id="liveElapsed">0s</span>
           </div>
           <div class="live-progress">
             <div class="live-progress-bar" id="liveProgressBar" style="width:0%"></div>
           </div>
         </div>
-
-        <!-- KPI triad -->
-        <div class="kpi-triad">
-          <div class="kpi-card">
-            <div class="kpi-l">Phases complete</div>
-            <div class="kpi-v" id="kpiActions">0</div>
-            <div class="kpi-s" id="kpiActionsSub">of 0 in this scan</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-l">Active module</div>
-            <div class="kpi-v sm" id="kpiPhase">—</div>
-            <div class="kpi-s" id="kpiPhaseSub">no scan in progress</div>
-          </div>
-          <div class="kpi-card" id="kpiBlastCard">
-            <div class="kpi-l">Run control</div>
-            <div class="kpi-v sm" id="kpiBlast">IDLE</div>
-            <div class="kpi-s" id="kpiBlastSub">start a scan with /run or the buttons below</div>
-          </div>
-        </div>
-        <div class="live-strip panel" id="runControls" style="margin-top:8px">
+        <div class="live-strip panel" id="runControls">
           <div class="live-strip-main">
             <button type="button" id="btnQuick" class="btn primary">Quick scan</button>
             <button type="button" id="btnPause" class="btn ghost">Pause</button>
@@ -124,42 +68,15 @@
             <button type="button" id="btnStop" class="btn ghost">Stop</button>
           </div>
           <div class="live-strip-meta">
-            <span class="chip">scope-gated · selected target</span>
+            <span class="chip">select a target first</span>
           </div>
         </div>
-
-        <!-- Phase tiles (one per module in the run) -->
-        <div class="panel phase-tiles-panel">
-          <div class="panel-h">
-            <h2>PHASE TILES</h2>
-            <span class="chip" id="phaseTilesChip">live · one tile per scan phase</span>
-          </div>
-          <div id="phaseTiles" class="phase-tiles"></div>
-        </div>
-
-        <div class="mission-grid live-grid">
-          <div class="panel chain-panel">
-            <div class="panel-h">
-              <h2>PIPELINE</h2>
-              <span class="chip">lights as phases complete</span>
-            </div>
-            <div class="chain-canvas-wrap">
-              <svg id="chainSvg" class="chain-svg" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet"></svg>
-            </div>
-            <div class="stage-legend">
-              <span><i class="lg s1"></i> 1 · enum / probe</span>
-              <span><i class="lg s2"></i> 2 · crawl</span>
-              <span><i class="lg s3"></i> 3 · detection</span>
-            </div>
-          </div>
-
-          <div class="panel fleet-panel">
-            <div class="panel-h">
-              <h2>MODULES</h2>
-              <span class="chip">pipeline stages</span>
-            </div>
-            <div id="fleetBoard" class="fleet-board"></div>
-          </div>
+        <div class="panel">
+          <div class="panel-h"><h2>MODULES</h2><span class="chip" id="phaseTilesChip">—</span></div>
+          <table class="data-table">
+            <thead><tr><th>Status</th><th>Module</th><th>Signals</th></tr></thead>
+            <tbody id="phaseTiles"></tbody>
+          </table>
         </div>
       </div>
 
@@ -286,35 +203,18 @@
       </div>
 
       <div id="viewGraph" class="view">
-        <div class="panel tactical-panel">
+        <div class="panel">
           <div class="panel-h">
-            <h2>ATTACK GRAPH</h2>
+            <h2>GRAPH</h2>
             <label class="inline">min score <input id="graphMinScore" type="number" value="40" min="0" max="100" /></label>
-            <div class="zoom-controls" role="group" aria-label="Map zoom">
-              <button type="button" id="btnZoomOut" class="btn ghost" title="Zoom out">−</button>
-              <span class="zoom-label" id="zoomLabel">100%</span>
-              <button type="button" id="btnZoomIn" class="btn ghost" title="Zoom in">+</button>
-              <button type="button" id="btnZoomReset" class="btn ghost" title="Reset view">⌂ Fit</button>
-            </div>
             <button type="button" id="btnGraphReload" class="btn primary">Reload</button>
+            <span class="chip" id="graphStats">0 nodes</span>
           </div>
-          <div class="tactical-body">
-            <div class="tactical-viewport graph-wrap" id="graphViewport" title="Scroll to zoom · drag canvas to pan · drag node · click hostname for detail">
-              <svg id="graphSvg" xmlns="http://www.w3.org/2000/svg"></svg>
-              <div id="graphEmpty" class="graph-empty hidden">No graph data — run recon + reindex first.</div>
-              <div class="tactical-hud" id="tacticalHud">
-                <span>graph</span>
-                <span id="graphStats">0 nodes</span>
-                <span class="hint">wheel zoom · drag pan · click hostname</span>
-              </div>
-            </div>
-            <aside class="tactical-fleet" id="tacticalFleet">
-              <div class="panel-h tight"><h2>NODE DETAIL</h2><span class="chip" id="nodeDetailChip">click a host</span></div>
-              <div id="tacticalFleetList" class="tactical-fleet-list">
-                <p class="muted" style="padding:8px">Click a hostname on the map to inspect target, module, score, and linked evidence.</p>
-              </div>
-            </aside>
-          </div>
+          <div id="graphEmpty" class="graph-empty hidden">No graph data — run recon + reindex first.</div>
+          <table class="data-table">
+            <thead><tr><th>Kind</th><th>Label</th><th>Module</th><th>Score</th></tr></thead>
+            <tbody id="graphBody"></tbody>
+          </table>
         </div>
       </div>
 
@@ -341,7 +241,6 @@
     <span>v3.0.0 · reconkit</span>
   </footer>
 
-  <script src="/ships.js?v=3.16-fix"></script>
-  <script src="/app.js?v=3.16-fix"></script>
+  <script src="/app.js?v=3.17-lite"></script>
 </body>
 </html>
