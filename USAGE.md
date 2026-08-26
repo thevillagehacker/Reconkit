@@ -113,7 +113,7 @@ v3.0.0/                          # â† cd here for all commands
 â”œâ”€â”€ shell/                       # REPL, theme, slash commands
 â”œâ”€â”€ findings/                    # indexer + scoring + store
 â”œâ”€â”€ dashboard/                   # HTTP server + static UI
-â”‚   â””â”€â”€ static/                  # app.css (Helvetica/Inter + JetBrains Mono)
+â”‚   â””â”€â”€ static/                  # app.css (Orbitron/Oxanium UI + JetBrains Mono data)
 â”œâ”€â”€ agents/
 â”‚   â”œâ”€â”€ llm.py                   # multi-provider client
 â”‚   â”œâ”€â”€ skills.py                # role + surface skill injection
@@ -794,8 +794,8 @@ if the host cannot connect.
 
 | Surface | Style |
 |---------|--------|
-| **UI text** | `Helvetica Neue`, **Inter**, system UI sans-serif |
-| **Console / evidence / mono** | **JetBrains Mono** (loaded from Google Fonts) |
+| **UI chrome** | **Orbitron** (titles / tabs) + **Oxanium** (buttons, labels) — cyber HUD |
+| **Data / file preview / tables** | **JetBrains Mono** (loaded from Google Fonts) |
 | **Evidence / file preview boxes** | Solid background `#1a1d24`, muted text `#a8b0bd` |
 
 This replaces neon green-on-black â€œterminalâ€ styling with a readable solid console.
@@ -819,7 +819,8 @@ Hard-refresh the browser (`Ctrl+F5`) after upgrading so `app.css?v=8` / `app.js?
 | GET | `/api/graph?target=&min_score=` | Attack-path nodes/edges (findings + proofs) |
 | GET | `/api/stats/charts?target=` | Severity/module/score/proof bar-chart data |
 | GET | `/api/program` | Active BB program profile + list |
-| GET | `/api/file?target=&path=` | Text preview of output file |
+| GET | `/api/file?target=&path=` | Text preview of output file (`too_large` + `raw_url` when > 2 MB) |
+| GET | `/raw/<target>/<path>` | GitHub-style raw file (`text/plain`, 50 MB cap) |
 | GET | `/api/inbox?target=` | Hunter C1+ triage queue + suggested prove technique |
 | POST | `/api/reindex` | Force full rebuild from disk (no process restart) |
 
@@ -2100,7 +2101,7 @@ Full design notes: **[skills/README.md](skills/README.md)** Â· **[skills/SKILL
 | **Critic** | `/critic [target]` | **Yes** |
 | **Rate profile** | `/rate stealth\|normal\|aggressive` | No |
 | Cyber dashboard | `/dashboard` Â· `recon_dashboard.py` | No |
-| **Dashboard typography / console** | Helvetica/Inter + JetBrains Mono | No |
+| **Dashboard typography / console** | Orbitron + Oxanium UI · JetBrains Mono data | No |
 | **Attack graph** | `/graph` Â· dashboard Graph tab | No |
 | **Insights charts** | dashboard Insights Â· `/api/stats/charts` | No |
 | Inline help | `/` Â· `/help` Â· `/<cmd> -h` | No |
@@ -2234,7 +2235,7 @@ python recon_agents.py run --target T --provider anthropic --model claude-sonnet
 ```bash
 python recon_dashboard.py [--host 127.0.0.1] [--port 8787] [--no-browser] [--no-refresh]
 # from Windows host when UI runs in VM: http://<VM_IP>:8787/
-# UI: Helvetica Neue/Inter Â· evidence: JetBrains Mono #1a1d24
+# UI: Orbitron + Oxanium · data: JetBrains Mono
 ```
 
 ---
@@ -2267,7 +2268,7 @@ Cloud API keys stay in env / local config â€” never commit them.
 | Empty stage output | `-v 2` or `-v 3`; read `~/.reconkit/logs/debug.log` |
 | Dashboard empty | Run a scan; click REINDEX or enable LIVE |
 | Dashboard not updating after scan | Enable **LIVE**, or REINDEX â€” do not restart unless port is stuck; hard-refresh browser once (`Ctrl+F5`) if old JS cached |
-| Dashboard fonts / console look old | `Ctrl+F5` after upgrade; expect Helvetica/Inter UI + JetBrains Mono evidence `#1a1d24` |
+| Dashboard fonts / console look old | `Ctrl+F5` after upgrade; expect Orbitron/Oxanium UI + JetBrains Mono data |
 | Dashboard stale | Reindex after every new scan |
 | LLM timeout | Raise `llm.timeout` via `/config set --timeout 300`; ensure model pulled / cloud key valid |
 | **`check-llm` Connection refused (111)** | `base_url` is wrong IP. From the VM: `curl http://<WINDOWS_IP>:11434/` must succeed, then `/config set --base-url http://<WINDOWS_IP>:11434`. Do **not** use the Kali/VM IP or `127.0.0.1` |

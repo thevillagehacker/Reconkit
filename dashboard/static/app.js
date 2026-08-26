@@ -86,11 +86,72 @@ function fillSelect(id, values, current) {
   ).join("");
 }
 
+function rawHref(target, rel) {
+  const t = encodeURIComponent(target || "");
+  const p = String(rel || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((seg) => seg && seg !== "..")
+    .map(encodeURIComponent)
+    .join("/");
+  return `/raw/${t}/${p}`;
+}
+
+function fmtBytes(n) {
+  const x = Number(n) || 0;
+  if (x < 1024) return `${x} B`;
+  if (x < 1024 * 1024) return `${(x / 1024).toFixed(1)} KB`;
+  return `${(x / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function setRawLink(href, visible) {
+  const a = $("rawLink");
+  if (!a) return;
+  if (visible && href) {
+    a.href = href;
+    a.hidden = false;
+  } else {
+    a.removeAttribute("href");
+    a.hidden = true;
+  }
+}
+
+function showTooLarge(data, href) {
+  const pre = $("filePreview");
+  pre.textContent = "";
+  const size = fmtBytes(data.size);
+  pre.appendChild(document.createTextNode(
+    `This file is too large to display (${size}).\n\n`
+  ));
+  const a = document.createElement("a");
+  a.href = href;
+  a.className = "raw-link";
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = "View raw";
+  pre.appendChild(a);
+  const cap = 50 * 1024 * 1024;
+  if (Number(data.size) > cap) {
+    pre.appendChild(document.createTextNode(
+      "\n\nBrowser raw view is capped at 50 MB. Open the file on disk instead."
+    ));
+  }
+  if (data.disk_path) {
+    pre.appendChild(document.createTextNode("\n\nOn disk:\n"));
+    const disk = document.createElement("span");
+    disk.className = "disk-path";
+    disk.textContent = data.disk_path;
+    pre.appendChild(disk);
+  }
+}
+
 async function loadOutputs() {
   if (!state.target) {
     $("fileBody").innerHTML = `<tr><td colspan="4" class="muted">Select a target</td></tr>`;
     $("filePreview").textContent = "Select a target in the left list.";
     $("fileCount").textContent = "0";
+    setRawLink("", false);
+    if ($("previewPath")) $("previewPath").textContent = "select a file";
     return;
   }
   const data = await api(`/api/outputs?target=${encodeURIComponent(state.target)}`);
@@ -129,12 +190,33 @@ async function openFile(rel) {
   state.filePath = rel;
   renderFileList();
   $("previewPath").textContent = rel;
+  const fallbackRaw = rawHref(state.target, rel);
+  setRawLink(fallbackRaw, true);
   try {
-    const data = await api(
-      `/api/file?target=${encodeURIComponent(state.target)}&path=${encodeURIComponent(rel)}`
+    const res = await fetch(
+      `/api/file?target=${encodeURIComponent(state.target)}&path=${encodeURIComponent(rel)}`,
+      { cache: "no-store", headers: { Accept: "application/json" } }
     );
+    const data = await res.json().catch(() => ({ error: res.statusText }));
+    const href = data.raw_url || fallbackRaw;
+    setRawLink(href, true);
+    if (data.too_large) {
+      state.fileContent = "";
+      showTooLarge(data, href);
+      return;
+    }
+    if (!res.ok) {
+      state.fileContent = "";
+      const msg = data.error || res.statusText || "failed to load file";
+      $("filePreview").textContent = msg + (href ? `\n\nView raw: ${href}` : "");
+      return;
+    }
     state.fileContent = data.content || "";
-    $("filePreview").textContent = state.fileContent || "(empty)";
+    let text = state.fileContent || "(empty)";
+    if (data.truncated) {
+      text += "\n\n— truncated; open View raw for the full file —";
+    }
+    $("filePreview").textContent = text;
   } catch (e) {
     $("filePreview").textContent = String(e.message || e);
   }

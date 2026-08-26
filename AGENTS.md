@@ -94,7 +94,7 @@ Maps to confidence **C2** when confirmed (see skill suite below).
 /graph show example.com
 /dashboard
 # tabs: Recon | Proofs | Graph | Insights
-# typography: Helvetica Neue / Inter UI; JetBrains Mono console
+# typography: Orbitron + Oxanium UI; JetBrains Mono data
 ```
 
 ```bash

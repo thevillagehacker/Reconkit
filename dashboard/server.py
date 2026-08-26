@@ -29,7 +29,8 @@ API (JSON):
   POST /api/control              # pause | resume | stop
   GET  /api/run                  # scan control status
   POST /api/reindex
-  GET  /api/file?target=&path=
+  GET  /api/file?target=&path=   # JSON preview; too_large files include raw_url
+  GET  /raw/<target>/<path>      # GitHub-style text/plain (50 MB cap)
   GET  /api/inbox                # hunter C1+ triage queue
 """
 
@@ -193,6 +194,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
         st, body, ct = _json_bytes(obj, status)
         self._send(st, body, ct)
 
+    def _send_raw(self, path: str) -> None:
+        """GitHub-style raw file: GET /raw/<target>/<relative-path> as text/plain."""
+        rest = unquote(path[len("/raw/"):]).lstrip("/")
+        if "/" not in rest:
+            self._send_json({"error": "usage: /raw/<target>/<path>"}, 400)
+            return
+        target, rel = rest.split("/", 1)
+        from dashboard.outputs import resolve_output_path
+        full, err = resolve_output_path(target, rel)
+        if err or full is None:
+            self._send_json({"error": err or "file not found"}, 404)
+            return
+        if full.stat().st_size > 50_000_000:
+            self._send_json({
+                "error": "file larger than 50 MB — open it on disk",
+                "disk_path": str(full),
+                "size": full.stat().st_size,
+            }, 413)
+            return
+        data = full.read_bytes()
+        # Prefer UTF-8 text in the browser; fallback latin-1 so bytes always display.
+        try:
+            data.decode("utf-8")
+            ctype = "text/plain; charset=utf-8"
+        except UnicodeDecodeError:
+            ctype = "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f'inline; filename="{full.name}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Reconkit-Disk-Path", str(full))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -207,6 +243,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/"):
             self._api_get(path, qs)
+            return
+
+        if path.startswith("/raw/"):
+            self._send_raw(path)
             return
 
         if path in ("", "/"):
@@ -638,33 +678,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not target or not rel:
                 self._send_json({"error": "target and path required"}, 400)
                 return
-            rel_path = Path(rel.replace("\\", "/"))
-            if ".." in rel_path.parts:
-                self._send_json({"error": "invalid path"}, 400)
-                return
-            base = (OUTPUT_DIR / target.replace("*", "_")).resolve()
-            full = (base / rel_path).resolve()
-            try:
-                full.relative_to(base)
-            except ValueError:
-                self._send_json({"error": "path outside target dir"}, 400)
-                return
-            if not full.exists() or not full.is_file():
-                self._send_json({"error": "file not found"}, 404)
-                return
-            if full.stat().st_size > 2_000_000:
-                self._send_json({"error": "file too large to preview", "size": full.stat().st_size}, 413)
-                return
-            try:
-                text = full.read_text(encoding="utf-8-sig", errors="replace")
-            except Exception:
-                text = full.read_text(encoding="utf-8", errors="replace")
-            self._send_json({
-                "target": target,
-                "path": rel.replace("\\", "/"),
-                "size": full.stat().st_size,
-                "content": text[:200_000],
-            })
+            from dashboard.outputs import read_output_file
+            rec = read_output_file(target, rel)
+            status = 200 if not rec.get("error") or rec.get("too_large") else 404
+            if rec.get("error") == "invalid path" or rec.get("error") == "path outside target dir":
+                status = 400
+            self._send_json(rec, status)
             return
 
         if path == "/api/modules":

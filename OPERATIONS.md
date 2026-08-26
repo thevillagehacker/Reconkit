@@ -705,8 +705,12 @@ curl -s http://127.0.0.1:8787/api/program
 # Diff history
 curl -s "http://127.0.0.1:8787/api/diff?target=example.com"
 
-# File preview
+# File preview (inline JSON). Files > 2 MB set too_large + raw_url instead of content.
 curl -s "http://127.0.0.1:8787/api/file?target=example.com&path=subdomains.txt"
+
+# GitHub-style raw (text/plain in the browser). Cap 50 MB.
+curl -s "http://127.0.0.1:8787/raw/example.com/urls.txt"
+curl -s "http://127.0.0.1:8787/raw/example.com/tools/crawl/katana.txt"
 
 # Hunter inbox (C1+ triage)
 curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
@@ -728,6 +732,7 @@ curl -s -X POST http://127.0.0.1:8787/api/reindex
 | GET | `/api/program` Â· `/api/programs` |
 | GET | `/api/diff?target=` |
 | GET | `/api/file?target=&path=` |
+| GET | `/raw/<target>/<path>` |
 | GET | `/api/modules` |
 | GET | `/api/inbox` · `/api/hunter` |
 | POST | `/api/reindex` · `/api/refresh` |

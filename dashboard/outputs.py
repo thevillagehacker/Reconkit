@@ -129,6 +129,7 @@ def list_output_files(target: str) -> dict[str, Any]:
             "size": size,
             "lines": lines,
             "mtime": path.stat().st_mtime,
+            "raw_url": raw_url(target, rel),
         })
     return {
         "target": target,
@@ -140,29 +141,56 @@ def list_output_files(target: str) -> dict[str, Any]:
     }
 
 
-def read_output_file(target: str, rel: str, max_chars: int = 200_000) -> dict[str, Any]:
+def raw_url(target: str, rel: str) -> str:
+    posix = rel.replace("\\", "/").lstrip("/")
+    parts = "/".join(p for p in posix.split("/") if p and p != "..")
+    from urllib.parse import quote
+    t = quote(target.replace("*", "_"), safe=".-")
+    return "/raw/" + t + "/" + "/".join(quote(seg, safe=".-") for seg in parts.split("/"))
+
+
+def resolve_output_path(target: str, rel: str) -> tuple[Path | None, str]:
+    """Return (absolute path, error). error is empty on success."""
     tdir = (OUTPUT_DIR / target.replace("*", "_")).resolve()
-    rel_path = Path(rel.replace("\\", "/"))
-    if ".." in rel_path.parts:
-        return {"error": "invalid path"}
+    rel_path = Path(str(rel).replace("\\", "/"))
+    if ".." in rel_path.parts or rel_path.is_absolute():
+        return None, "invalid path"
     full = (tdir / rel_path).resolve()
     try:
         full.relative_to(tdir)
     except ValueError:
-        return {"error": "path outside target dir"}
+        return None, "path outside target dir"
     if not full.is_file():
-        return {"error": "file not found"}
-    if full.stat().st_size > 4_000_000:
-        return {"error": "file too large", "size": full.stat().st_size}
-    text = full.read_text(encoding="utf-8-sig", errors="replace")
-    phase, tool, kind = _classify(rel)
-    return {
+        return None, "file not found"
+    return full, ""
+
+
+def read_output_file(target: str, rel: str, max_chars: int = 200_000) -> dict[str, Any]:
+    posix = str(rel).replace("\\", "/")
+    full, err = resolve_output_path(target, posix)
+    if err or full is None:
+        return {"error": err or "file not found", "raw_url": raw_url(target, posix)}
+    size = full.stat().st_size
+    phase, tool, kind = _classify(posix)
+    out: dict[str, Any] = {
         "target": target,
-        "path": rel.replace("\\", "/"),
+        "path": posix,
         "phase": phase,
         "tool": tool,
         "kind": kind,
-        "size": full.stat().st_size,
-        "content": text[:max_chars],
-        "truncated": len(text) > max_chars,
+        "size": size,
+        "disk_path": str(full),
+        "raw_url": raw_url(target, posix),
+        "content": "",
+        "truncated": False,
+        "too_large": False,
     }
+    preview_cap = 2_000_000
+    if size > preview_cap:
+        out["too_large"] = True
+        out["error"] = "file too large to preview inline"
+        return out
+    text = full.read_text(encoding="utf-8-sig", errors="replace")
+    out["content"] = text[:max_chars]
+    out["truncated"] = len(text) > max_chars
+    return out

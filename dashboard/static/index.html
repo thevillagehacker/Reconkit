@@ -6,7 +6,10 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>RECONKIT</title>
   <meta name="theme-color" content="#0a0a0a" />
-  <link rel="stylesheet" href="/app.css?v=3.19-view" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Orbitron:wght@500;600;700;800;900&family=Oxanium:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css?v=3.21-type" />
 </head>
 <body class="dash lite">
   <header class="dash-header">
@@ -70,7 +73,11 @@
             </div>
           </div>
           <div class="panel">
-            <div class="panel-h"><h2>PREVIEW</h2><span class="chip" id="previewPath">select a file</span></div>
+            <div class="panel-h preview-h">
+              <h2>PREVIEW</h2>
+              <span class="chip" id="previewPath">select a file</span>
+              <a id="rawLink" class="raw-link" hidden target="_blank" rel="noopener">View raw</a>
+            </div>
             <pre class="file-preview" id="filePreview">Select a target, then a file. This is the same text reconkit writes under ~/.reconkit/output/&lt;target&gt;/.</pre>
           </div>
         </div>
@@ -104,6 +111,6 @@
     <span>v3.0.0 · reconkit</span>
   </footer>
 
-  <script src="/app.js?v=3.19-view"></script>
+  <script src="/app.js?v=3.21-type"></script>
 </body>
 </html>
