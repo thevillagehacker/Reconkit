@@ -216,13 +216,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
-        # drain body if any (clients may send Content-Length)
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
-        if n > 0:
-            self.rfile.read(n)
+        post_body = self.rfile.read(n) if n > 0 else b""
 
         if path in ("/api/reindex", "/api/refresh"):
             t0 = time.time()
@@ -241,20 +239,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path in ("/api/run", "/api/scan/start"):
-            raw = b""
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = 0
-            # body already drained in do_POST — parse query instead if empty
             qs = parse_qs(urlparse(self.path).query)
             target = (qs.get("target") or [""])[0]
             modules = (qs.get("modules") or ["quick"])[0]
+            if post_body:
+                try:
+                    obj = json.loads(post_body.decode("utf-8"))
+                    target = str(obj.get("target") or target)
+                    modules = str(obj.get("modules") or modules)
+                except Exception:
+                    pass
             try:
                 from dashboard.control import start_scan
                 self._send_json(start_scan(target=target, modules=modules, source="dashboard"))
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+            return
+
+        if path in ("/api/prompt", "/api/ask"):
+            try:
+                obj = json.loads(post_body.decode("utf-8") or "{}")
+            except Exception:
+                self._send_json({"ok": False, "error": "invalid JSON"}, 400)
+                return
+            from dashboard.prompt import run_prompt
+            self._send_json(run_prompt(
+                prompt=str(obj.get("prompt") or ""),
+                target=str(obj.get("target") or ""),
+                path=str(obj.get("path") or ""),
+            ))
             return
 
         if path in ("/api/control", "/api/scan/control"):
@@ -603,6 +616,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "output_fingerprint": idx.get("output_fingerprint"),
                 "generated_at": idx.get("generated_at"),
             })
+            return
+
+        if path in ("/api/outputs", "/api/files"):
+            target = q("target")
+            if not target:
+                self._send_json({"error": "target required"}, 400)
+                return
+            from dashboard.outputs import list_output_files
+            self._send_json(list_output_files(target))
+            return
+
+        if path in ("/api/llm", "/api/prompt"):
+            from dashboard.prompt import llm_status
+            self._send_json(llm_status())
             return
 
         if path == "/api/file":

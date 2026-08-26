@@ -8,11 +8,10 @@ recon_dashboard.py — local findings dashboard (v3.0.0)
   python recon_dashboard.py --host 0.0.0.0            # VM / LAN
 
 Tabs:
-  SCAN      — live module tracker (play/pause from the UI)
-  FINDINGS  — recon records (default C1+)
-  PROOFS    — /prove results
-  GRAPH     — relationship graph
-  INSIGHTS  — charts
+  OUTPUT    — CLI recon files (filter by phase/tool)
+  PROMPT    — ask the configured local or cloud LLM about a file
+
+Scans are started from the CLI (`python recon_shell.py` / reconkit.py run).
 
 API:
   GET  /api/scan?target=example.com

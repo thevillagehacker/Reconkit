@@ -1093,3 +1093,38 @@ code {
 }
 .atmosphere, .stars, .scan-veil, .vignette, .lcars-cap { display: none !important; }
 body.lite { background: var(--bg); }
+
+.output-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr);
+  gap: 10px;
+  min-height: 0;
+}
+.file-preview {
+  margin: 0;
+  padding: 12px;
+  max-height: 62vh;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0c0a0b;
+  color: #d4c8cc;
+  border-top: 1px solid var(--line);
+}
+#fileBody tr.active { outline: 1px solid var(--accent); }
+#promptText {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0c0a0b;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+@media (max-width: 1000px) {
+  .output-split { grid-template-columns: 1fr; }
+}

@@ -1,19 +1,14 @@
-/* RECONKIT dashboard — no animations, no force-layout, poll only when needed */
+/* RECONKIT dashboard — OUTPUT / PROMPT (scans stay on the CLI) */
 
 const state = {
-  view: "mission",
+  view: "output",
   target: "",
-  module: "",
-  severity: "",
-  type: "",
-  notable: "",
-  confidence: "C1",
-  q: "",
-  limit: 80,
-  offset: 0,
-  total: 0,
-  proofStatus: "",
-  graphMinScore: 40,
+  phase: "",
+  tool: "",
+  fileQ: "",
+  files: [],
+  filePath: "",
+  fileContent: "",
   pollTimer: null,
   fingerprint: "",
 };
@@ -33,13 +28,6 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-function stripAnsi(s) {
-  return String(s ?? "")
-    .replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
-    .replace(/\[(?:\d{1,3};){0,8}\d{1,3}m/g, "")
-    .replace(/[ \t]{2,}/g, " ");
-}
-
 function esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -48,32 +36,17 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
-function sevClass(s) {
-  return `sev sev-${(s || "unknown").toLowerCase()}`;
-}
-
 function setView(name) {
   state.view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   document.querySelectorAll(".btab").forEach((b) => b.classList.remove("active"));
-  const map = {
-    mission: "viewMission",
-    recon: "viewRecon",
-    inbox: "viewInbox",
-    proofs: "viewProofs",
-    graph: "viewGraph",
-    insights: "viewInsights",
-  };
+  const map = { output: "viewOutput", prompt: "viewPrompt" };
   const el = $(map[name]);
   if (el) el.classList.add("active");
   const tab = document.querySelector(`.btab[data-view="${name}"]`);
   if (tab) tab.classList.add("active");
-  if (name === "mission") loadMission();
-  if (name === "recon") loadRecon();
-  if (name === "inbox") loadInbox();
-  if (name === "proofs") loadProofs();
-  if (name === "graph") loadGraph();
-  if (name === "insights") loadInsights();
+  if (name === "output") loadOutputs();
+  if (name === "prompt") loadLlm();
 }
 
 async function loadTargets() {
@@ -85,14 +58,15 @@ async function loadTargets() {
   let n = 0;
   for (const t of list) {
     const name = t.target || t.name || t;
-    const count = t.finding_count ?? t.record_count ?? t.count ?? "";
     if (q && !String(name).toLowerCase().includes(q)) continue;
     n++;
     const li = document.createElement("li");
     if (state.target === name) li.classList.add("active");
+    const count = t.finding_count ?? "";
     li.innerHTML = `<span>${esc(name)}</span><span class="meta">${count}</span>`;
     li.onclick = () => {
       state.target = name;
+      if ($("missionBanner")) $("missionBanner").textContent = name;
       $("btnAllTargets").classList.remove("active");
       loadTargets();
       refreshAll();
@@ -103,209 +77,109 @@ async function loadTargets() {
   if (!state.target) $("btnAllTargets").classList.add("active");
 }
 
-async function loadMission() {
-  const q = new URLSearchParams();
-  if (state.target) q.set("target", state.target);
-  q.set("mode", "live");
-  const m = await api(`/api/scan?${q}`);
-  const s = m.summary || {};
-  const st = (m.status || "idle").toUpperCase();
-  const active = !!m.active;
-  if ($("missionBanner")) {
-    $("missionBanner").textContent = active
-      ? `${st} · ${m.current_module || "…"}`
-      : `${st}`;
-  }
-  if ($("liveStatusLabel")) $("liveStatusLabel").textContent = st;
-  if ($("liveMessage")) $("liveMessage").textContent = m.message || m.current_tool || "—";
-  if ($("livePhaseFrac")) {
-    $("livePhaseFrac").textContent = `${s.phases_complete ?? 0} / ${s.phases_total ?? 0}`;
-  }
-  if ($("liveElapsed")) $("liveElapsed").textContent = `${s.elapsed_s ?? 0}s`;
-  if ($("liveProgressBar")) {
-    $("liveProgressBar").style.width = `${Math.min(100, s.pct ?? 0)}%`;
-  }
-  const pill = $("alertPill");
-  if (pill) {
-    pill.className = "alert-pill " + (active ? "yellow" : "green");
-    pill.textContent = active ? "SCAN" : "IDLE";
-  }
-  const tiles = m.tiles || [];
-  const body = $("phaseTiles");
-  if (body) {
-    body.innerHTML = tiles.map((t) => `
-      <tr>
-        <td>${esc(t.status || "")}</td>
-        <td>${esc(t.id || t.ship || "")}</td>
-        <td>${esc(t.signals ?? 0)}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="3" class="muted">No scan yet — pick a target and Quick scan, or /run</td></tr>`;
-  }
-  if ($("phaseTilesChip")) {
-    $("phaseTilesChip").textContent = `${tiles.length} module(s)`;
-  }
+function fillSelect(id, values, current) {
+  const sel = $(id);
+  if (!sel) return;
+  const keep = current || "";
+  sel.innerHTML = `<option value="">all</option>` + values.map((v) =>
+    `<option value="${esc(v)}" ${v === keep ? "selected" : ""}>${esc(v)}</option>`
+  ).join("");
 }
 
-async function loadRecon() {
-  const params = new URLSearchParams();
-  if (state.target) params.set("target", state.target);
-  if (state.module) params.set("module", state.module);
-  if (state.severity) params.set("severity", state.severity);
-  if (state.type) params.set("type", state.type);
-  if (state.notable) params.set("notable", state.notable);
-  if (state.q) params.set("q", state.q);
-  if (state.confidence) params.set("min_confidence", state.confidence);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  const [ov, rec] = await Promise.all([
-    api(`/api/overview?${params}`),
-    api(`/api/records?${params}`),
-  ]);
-  $("kpiFindings").textContent = ov.record_count ?? ov.finding_count ?? "—";
-  $("kpiTargets").textContent = ov.target_count ?? "—";
-  $("kpiCrit").textContent = (ov.by_severity || {}).critical ?? 0;
-  $("kpiHigh").textContent = (ov.by_severity || {}).high ?? 0;
-  $("kpiMed").textContent = (ov.by_severity || {}).medium ?? 0;
-  $("kpiProofsMini").textContent = ov.proof_confirmed ?? ov.proof_count ?? 0;
-  $("activeTargetChip").textContent = state.target || "all targets";
-  $("programBadge").textContent = `program: ${ov.program || "default"}`;
-  const mods = Object.keys(ov.by_module || {}).sort();
-  const sel = $("fltModule");
-  const cur = state.module;
-  sel.innerHTML = `<option value="">all</option>` + mods.map((m) =>
-    `<option value="${esc(m)}" ${m === cur ? "selected" : ""}>${esc(m)}</option>`
-  ).join("");
-  const rows = rec.records || rec.findings || [];
-  state.total = rec.total ?? rows.length;
-  const fb = rec.filters && rec.filters.confidence_fallback;
-  $("reconPageInfo").textContent = `${state.offset + 1}–${state.offset + rows.length} / ${state.total}`
-    + (fb ? ` · showing ${fb} inventory (no C1+)` : "");
-  $("findingsBody").innerHTML = rows.map((r) => `
-    <tr data-id="${esc(r.id)}">
-      <td><span class="${sevClass(r.severity)}">${esc(r.severity)}</span></td>
-      <td>${esc(r.confidence || "C0")}</td>
-      <td>${esc(r.module)}</td>
-      <td>${esc(r.ftype)}</td>
-      <td>${esc(stripAnsi(r.title))}</td>
-      <td>${esc(stripAnsi(r.asset))}</td>
-      <td>${esc(r.score)}</td>
+async function loadOutputs() {
+  if (!state.target) {
+    $("fileBody").innerHTML = `<tr><td colspan="4" class="muted">Select a target</td></tr>`;
+    $("filePreview").textContent = "Select a target in the left list.";
+    $("fileCount").textContent = "0";
+    return;
+  }
+  const data = await api(`/api/outputs?target=${encodeURIComponent(state.target)}`);
+  state.files = data.files || [];
+  fillSelect("fltPhase", data.phases || [], state.phase);
+  fillSelect("fltTool", data.tools || [], state.tool);
+  renderFileList();
+}
+
+function renderFileList() {
+  const q = (state.fileQ || "").toLowerCase();
+  const rows = (state.files || []).filter((f) => {
+    if (state.phase && f.phase !== state.phase) return false;
+    if (state.tool && f.tool !== state.tool) return false;
+    if (q && !String(f.path || "").toLowerCase().includes(q) && !String(f.name || "").toLowerCase().includes(q)) {
+      return false;
+    }
+    return true;
+  });
+  $("fileCount").textContent = String(rows.length);
+  $("fileBody").innerHTML = rows.map((f) => `
+    <tr data-path="${esc(f.path)}" class="${f.path === state.filePath ? "active" : ""}">
+      <td>${esc(f.phase)}</td>
+      <td>${esc(f.tool)}</td>
+      <td>${esc(f.path)}</td>
+      <td>${esc(f.lines)}</td>
     </tr>
-  `).join("");
-  $("findingsBody").querySelectorAll("tr").forEach((tr) => {
-    tr.onclick = () => {
-      const r = rows.find((x) => x.id === tr.dataset.id);
-      if (!r) return;
-      $("detailBody").innerHTML = `
-        <h3>${esc(stripAnsi(r.title))}</h3>
-        <div class="kv">
-          <div class="k">Module</div><div>${esc(r.module)}</div>
-          <div class="k">Severity</div><div><span class="${sevClass(r.severity)}">${esc(r.severity)}</span></div>
-          <div class="k">Asset</div><div>${esc(stripAnsi(r.asset))}</div>
-          <div class="k">Score</div><div>${esc(r.score)}</div>
-        </div>
-        <pre>${esc(stripAnsi(r.evidence || ""))}</pre>
-      `;
-    };
+  `).join("") || `<tr><td colspan="4" class="muted">No files yet — run a scan</td></tr>`;
+  $("fileBody").querySelectorAll("tr[data-path]").forEach((tr) => {
+    tr.onclick = () => openFile(tr.dataset.path);
   });
 }
 
-async function loadInbox() {
-  const params = new URLSearchParams();
-  if (state.target) params.set("target", state.target);
-  params.set("limit", "50");
+async function openFile(rel) {
+  if (!state.target || !rel) return;
+  state.filePath = rel;
+  renderFileList();
+  $("previewPath").textContent = rel;
   try {
-    const data = await api(`/api/inbox?${params}`);
-    const rows = data.items || [];
-    if ($("inboxMeta")) $("inboxMeta").textContent = `${data.count ?? rows.length} items`;
-    if ($("inboxSession")) {
-      $("inboxSession").textContent = `${data.session || "no session"} · C1+ triage`;
-    }
-    const body = $("inboxBody");
-    if (!body) return;
-    body.innerHTML = rows.map((r) => `
-      <tr>
-        <td>${esc(r.confidence || "")}</td>
-        <td>${esc(r.severity || "")}</td>
-        <td>${esc(r.module || "")}</td>
-        <td>${esc((r.title || "").slice(0, 48))}</td>
-        <td>${esc((r.asset || "").slice(0, 56))}</td>
-        <td>${esc(r.score ?? "")}</td>
-        <td>${esc(r.technique || "—")}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="7" class="muted">Inbox empty — run recon + reindex</td></tr>`;
+    const data = await api(
+      `/api/file?target=${encodeURIComponent(state.target)}&path=${encodeURIComponent(rel)}`
+    );
+    state.fileContent = data.content || "";
+    $("filePreview").textContent = state.fileContent || "(empty)";
   } catch (e) {
-    const body = $("inboxBody");
-    if (body) body.innerHTML = `<tr><td colspan="7">${esc(e.message)}</td></tr>`;
+    $("filePreview").textContent = String(e.message || e);
   }
 }
 
-async function loadProofs() {
-  const params = new URLSearchParams();
-  if (state.target) params.set("target", state.target);
-  if (state.proofStatus) params.set("status", state.proofStatus);
-  params.set("limit", "100");
+async function loadLlm() {
   try {
-    const data = await api(`/api/proofs?${params}`);
-    const rows = data.proofs || data.records || [];
-    $("proofMeta").textContent = `${rows.length} proofs`;
-    $("proofsBody").innerHTML = rows.map((p) => `
-      <tr>
-        <td>${esc(p.status)}</td>
-        <td>${esc(p.technique || p.tech)}</td>
-        <td>${esc(p.target)}</td>
-        <td>${esc(p.title || p.summary || "")}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="4" class="muted">No proofs yet — run /prove</td></tr>`;
+    const st = await api("/api/llm");
+    $("llmChip").textContent = st.ok
+      ? `${st.provider || "?"} · ${st.model || "?"}`
+      : (st.error || "not configured");
   } catch (e) {
-    $("proofsBody").innerHTML = `<tr><td colspan="4">${esc(e.message)}</td></tr>`;
+    $("llmChip").textContent = String(e.message || e);
   }
 }
 
-async function loadGraph() {
-  const minScore = ($("graphMinScore") && $("graphMinScore").value) || state.graphMinScore || 40;
-  state.graphMinScore = Number(minScore) || 0;
-  const p = new URLSearchParams();
-  if (state.target) p.set("target", state.target);
-  p.set("min_score", String(state.graphMinScore));
-  p.set("max_nodes", "80");
-  try {
-    const data = await api("/api/graph?" + p.toString());
-    const nodes = data.nodes || [];
-    if ($("graphStats")) {
-      $("graphStats").textContent = `${nodes.length} nodes`;
-    }
-    const empty = $("graphEmpty");
-    if (empty) empty.classList.toggle("hidden", nodes.length > 0);
-    const body = $("graphBody");
-    if (body) {
-      body.innerHTML = nodes.slice(0, 80).map((n) => `
-        <tr>
-          <td>${esc(n.kind || "")}</td>
-          <td>${esc(stripAnsi(n.label || n.title || n.id || ""))}</td>
-          <td>${esc(n.module || "")}</td>
-          <td>${esc(n.score ?? "")}</td>
-        </tr>
-      `).join("");
-    }
-  } catch (e) {
-    const empty = $("graphEmpty");
-    if (empty) {
-      empty.classList.remove("hidden");
-      empty.textContent = String(e.message || e);
-    }
+async function sendPrompt() {
+  const prompt = ($("promptText").value || "").trim();
+  if (!prompt) {
+    $("promptReply").textContent = "Type a prompt first.";
+    return;
   }
-}
-
-async function loadInsights() {
+  const attach = $("chkAttach") && $("chkAttach").checked;
+  $("promptReply").textContent = "…";
+  $("btnSendPrompt").disabled = true;
   try {
-    const c = await api("/api/stats/charts");
-    const root = $("insightsRoot");
-    const byMod = c.by_module || c.modules || {};
-    root.innerHTML = Object.entries(byMod).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, v]) =>
-      `<div class="insights-bar"><span>${esc(k)}</span><span>${v}</span></div>`
-    ).join("") || "No data — reindex after a scan.";
+    const data = await api("/api/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        target: state.target || "",
+        path: attach ? (state.filePath || "") : "",
+      }),
+    });
+    if (!data.ok) {
+      $("promptReply").textContent = data.error || "request failed";
+      return;
+    }
+    $("llmChip").textContent = `${data.provider || "?"} · ${data.model || "?"}`;
+    $("promptReply").textContent = data.reply || "(empty reply)";
   } catch (e) {
-    $("insightsRoot").textContent = e.message;
+    $("promptReply").textContent = String(e.message || e);
+  } finally {
+    $("btnSendPrompt").disabled = false;
   }
 }
 
@@ -313,16 +187,13 @@ async function pollStatus() {
   try {
     const st = await api("/api/status");
     const fp = st.disk_fingerprint || st.memory_fingerprint || "";
-    const running = String(st.status || "").toLowerCase() === "running" || st.scan_active;
     if (state.fingerprint && fp && fp !== state.fingerprint) {
       state.fingerprint = fp;
-      if (state.view === "mission") await loadMission();
-      else await refreshAll();
+      if (state.view === "output") await loadOutputs();
     } else if (!state.fingerprint) {
       state.fingerprint = fp;
     }
-    if (state.view === "mission") await loadMission();
-    $("footerStatus").textContent = running ? "scan running" : "dashboard";
+    $("footerStatus").textContent = "dashboard";
   } catch (_) { /* ignore */ }
 }
 
@@ -332,24 +203,10 @@ function startPoll() {
   pollStatus();
 }
 
-async function reindex() {
-  $("btnRefresh").textContent = "…";
-  try {
-    await api("/api/reindex", { method: "POST" });
-    await refreshAll();
-  } finally {
-    $("btnRefresh").textContent = "reindex";
-  }
-}
-
 async function refreshAll() {
   await loadTargets();
-  if (state.view === "mission") await loadMission();
-  else if (state.view === "recon") await loadRecon();
-  else if (state.view === "inbox") await loadInbox();
-  else if (state.view === "proofs") await loadProofs();
-  else if (state.view === "graph") await loadGraph();
-  else if (state.view === "insights") await loadInsights();
+  if (state.view === "output") await loadOutputs();
+  else if (state.view === "prompt") await loadLlm();
 }
 
 function wire() {
@@ -358,77 +215,35 @@ function wire() {
   });
   $("btnAllTargets").onclick = () => {
     state.target = "";
+    if ($("missionBanner")) $("missionBanner").textContent = "CLI output viewer";
     loadTargets();
     refreshAll();
   };
   $("targetSearch").oninput = () => loadTargets();
-  $("btnRefresh").onclick = () => reindex();
-  $("btnApply").onclick = () => {
-    state.module = $("fltModule").value;
-    state.severity = $("fltSeverity").value;
-    state.type = $("fltType").value;
-    state.notable = $("fltNotable").value;
-    state.confidence = ($("fltConfidence") && $("fltConfidence").value) || "C1";
-    state.q = $("fltQuery").value;
-    state.offset = 0;
-    loadRecon();
+  $("btnRefresh").onclick = () => refreshAll();
+  $("btnOutputApply").onclick = () => {
+    state.phase = $("fltPhase").value;
+    state.tool = $("fltTool").value;
+    state.fileQ = $("fltFileQ").value;
+    renderFileList();
   };
-  $("btnClear").onclick = () => {
-    state.module = state.severity = state.type = state.notable = state.q = "";
-    state.confidence = "C1";
-    $("fltModule").value = "";
-    $("fltSeverity").value = "";
-    $("fltType").value = "";
-    $("fltNotable").value = "";
-    if ($("fltConfidence")) $("fltConfidence").value = "C1";
-    $("fltQuery").value = "";
-    state.offset = 0;
-    loadRecon();
-  };
-  const postCtl = async (path) => {
-    const res = await fetch(path, { method: "POST", cache: "no-store" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      alert(data.error || res.statusText || "request failed");
+  $("btnAskFile").onclick = () => {
+    if (!state.filePath) {
+      alert("Open a file in OUTPUT first.");
       return;
     }
-    loadMission();
-  };
-  if ($("btnQuick")) {
-    $("btnQuick").onclick = () => {
-      if (!state.target) {
-        alert("Select an in-scope target in the list first.");
-        return;
-      }
-      postCtl(`/api/run?target=${encodeURIComponent(state.target)}&modules=quick`);
-    };
-  }
-  if ($("btnPause")) $("btnPause").onclick = () => postCtl("/api/control?action=pause");
-  if ($("btnResume")) $("btnResume").onclick = () => postCtl("/api/control?action=resume");
-  if ($("btnStop")) $("btnStop").onclick = () => postCtl("/api/control?action=stop");
-  $("btnPrev").onclick = () => {
-    state.offset = Math.max(0, state.offset - state.limit);
-    loadRecon();
-  };
-  $("btnNext").onclick = () => {
-    if (state.offset + state.limit < state.total) {
-      state.offset += state.limit;
-      loadRecon();
+    setView("prompt");
+    $("chkAttach").checked = true;
+    if (!$("promptText").value) {
+      $("promptText").value = `Summarize this recon file and flag anything worth /prove or manual review. Stay in-scope.`;
     }
   };
-  $("btnProofApply").onclick = () => {
-    state.proofStatus = $("fltProofStatus").value;
-    loadProofs();
-  };
-  $("btnGraphReload").onclick = () => {
-    state.graphMinScore = Number($("graphMinScore").value) || 40;
-    loadGraph();
-  };
+  $("btnSendPrompt").onclick = () => sendPrompt();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   wire();
   await refreshAll();
   startPoll();
-  setView("mission");
+  setView("output");
 });

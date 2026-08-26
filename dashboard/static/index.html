@@ -6,32 +6,26 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>RECONKIT</title>
   <meta name="theme-color" content="#0a0a0a" />
-  <link rel="stylesheet" href="/app.css?v=3.17-lite" />
+  <link rel="stylesheet" href="/app.css?v=3.19-view" />
 </head>
 <body class="dash lite">
   <header class="dash-header">
     <div class="brand-block">
       <div>
         <div class="brand-title">RECONKIT</div>
-        <div class="brand-sub" id="missionBanner">idle</div>
+        <div class="brand-sub" id="missionBanner">CLI output viewer</div>
       </div>
     </div>
     <nav class="dash-tabs" role="tablist">
-      <button type="button" class="btab active" data-view="mission" id="tabMission">SCAN</button>
-      <button type="button" class="btab" data-view="recon" id="tabRecon">FINDINGS</button>
-      <button type="button" class="btab" data-view="inbox" id="tabInbox">INBOX</button>
-      <button type="button" class="btab" data-view="proofs" id="tabProofs">PROOFS</button>
-      <button type="button" class="btab" data-view="graph" id="tabGraph">GRAPH</button>
-      <button type="button" class="btab" data-view="insights" id="tabInsights">INSIGHTS</button>
+      <button type="button" class="btab active" data-view="output" id="tabOutput">OUTPUT</button>
+      <button type="button" class="btab" data-view="prompt" id="tabPrompt">PROMPT</button>
     </nav>
     <div class="header-actions">
-      <span id="alertPill" class="alert-pill green">IDLE</span>
-      <button type="button" id="btnRefresh" class="btn primary">reindex</button>
+      <button type="button" id="btnRefresh" class="btn primary">reload</button>
     </div>
   </header>
 
   <main class="dash-layout">
-    <!-- Fleet / targets rail -->
     <aside class="panel fleet-rail">
       <div class="panel-h">
         <h2>TARGETS</h2>
@@ -45,202 +39,71 @@
     </aside>
 
     <section class="main-stage">
-      <!-- ========== LIVE PHASE TRACKER ========== -->
-      <div id="viewMission" class="view active">
-        <div class="live-strip panel" id="liveStrip">
-          <div class="live-strip-main">
-            <span class="live-status" id="liveStatusLabel">IDLE</span>
-            <span class="live-msg" id="liveMessage">waiting for /run</span>
-          </div>
-          <div class="live-strip-meta">
-            <span id="livePhaseFrac">0 / 0</span>
-            <span id="liveElapsed">0s</span>
-          </div>
-          <div class="live-progress">
-            <div class="live-progress-bar" id="liveProgressBar" style="width:0%"></div>
-          </div>
-        </div>
-        <div class="live-strip panel" id="runControls">
-          <div class="live-strip-main">
-            <button type="button" id="btnQuick" class="btn primary">Quick scan</button>
-            <button type="button" id="btnPause" class="btn ghost">Pause</button>
-            <button type="button" id="btnResume" class="btn ghost">Resume</button>
-            <button type="button" id="btnStop" class="btn ghost">Stop</button>
-          </div>
-          <div class="live-strip-meta">
-            <span class="chip">select a target first</span>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-h"><h2>MODULES</h2><span class="chip" id="phaseTilesChip">—</span></div>
-          <table class="data-table">
-            <thead><tr><th>Status</th><th>Module</th><th>Signals</th></tr></thead>
-            <tbody id="phaseTiles"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ========== SENSORS (classic recon table) ========== -->
-      <div id="viewRecon" class="view">
-        <div class="kpi-row" id="kpiRowRecon">
-          <div class="kpi"><div class="kpi-label">Records</div><div class="kpi-val" id="kpiFindings">—</div></div>
-          <div class="kpi"><div class="kpi-label">Targets</div><div class="kpi-val" id="kpiTargets">—</div></div>
-          <div class="kpi kpi-crit"><div class="kpi-label">Critical</div><div class="kpi-val" id="kpiCrit">—</div></div>
-          <div class="kpi kpi-high"><div class="kpi-label">High</div><div class="kpi-val" id="kpiHigh">—</div></div>
-          <div class="kpi kpi-med"><div class="kpi-label">Medium</div><div class="kpi-val" id="kpiMed">—</div></div>
-          <div class="kpi"><div class="kpi-label">Proofs</div><div class="kpi-val" id="kpiProofsMini">—</div></div>
-        </div>
+      <div id="viewOutput" class="view active">
         <div class="panel filters-panel">
-          <div class="panel-h"><h2>Filters</h2><span class="chip" id="activeTargetChip">all targets</span></div>
+          <div class="panel-h">
+            <h2>RECON OUTPUT</h2>
+            <span class="chip" id="outputChip">same files as the CLI</span>
+          </div>
           <div class="filters">
-            <label>Module<select id="fltModule"><option value="">all</option></select></label>
-            <label>Severity
-              <select id="fltSeverity">
-                <option value="">all</option>
-                <option value="critical">critical</option>
-                <option value="high">high</option>
-                <option value="medium">medium</option>
-                <option value="low">low</option>
-                <option value="info">info</option>
-              </select>
+            <label>Phase
+              <select id="fltPhase"><option value="">all phases</option></select>
             </label>
-            <label>Type
-              <select id="fltType">
-                <option value="">all</option>
-                <option value="subdomain">subdomain</option>
-                <option value="host">alive host</option>
-                <option value="url">url</option>
-                <option value="secret">secret</option>
-                <option value="vuln">vuln</option>
-                <option value="param">param</option>
-                <option value="cloud">cloud</option>
-                <option value="tls">tls</option>
-              </select>
+            <label>Tool
+              <select id="fltTool"><option value="">all tools</option></select>
             </label>
-            <label>Notable
-              <select id="fltNotable">
-                <option value="">all</option>
-                <option value="1">notable only</option>
-              </select>
+            <label class="grow">Search
+              <input id="fltFileQ" type="search" placeholder="filename…" />
             </label>
-            <label>Confidence
-              <select id="fltConfidence">
-                <option value="C1">C1+ (hide inventory)</option>
-                <option value="C2">C2+ confirmed</option>
-                <option value="all">all including C0</option>
-              </select>
-            </label>
-            <label class="grow">Search<input id="fltQuery" type="search" placeholder="asset, title…" /></label>
-            <div class="filter-actions">
-              <button type="button" id="btnApply" class="btn primary">Apply</button>
-              <button type="button" id="btnClear" class="btn ghost">Clear</button>
+            <button type="button" id="btnOutputApply" class="btn primary">Filter</button>
+            <button type="button" id="btnAskFile" class="btn ghost">Ask about this file</button>
+          </div>
+        </div>
+        <div class="output-split">
+          <div class="panel">
+            <div class="panel-h"><h2>FILES</h2><span class="chip" id="fileCount">0</span></div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Phase</th><th>Tool</th><th>File</th><th>Lines</th></tr></thead>
+                <tbody id="fileBody"></tbody>
+              </table>
             </div>
           </div>
-        </div>
-        <div class="panel table-panel">
-          <div class="panel-h"><h2>Findings</h2><span id="reconPageInfo" class="chip">—</span></div>
-          <div class="table-wrap">
-            <table class="data-table" id="findingsTable">
-              <thead>
-                <tr>
-                  <th>Sev</th><th>C</th><th>Module</th><th>Type</th><th>Title</th><th>Asset</th><th>Score</th>
-                </tr>
-              </thead>
-              <tbody id="findingsBody"></tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <button type="button" id="btnPrev" class="btn ghost">Prev</button>
-            <button type="button" id="btnNext" class="btn ghost">Next</button>
+          <div class="panel">
+            <div class="panel-h"><h2>PREVIEW</h2><span class="chip" id="previewPath">select a file</span></div>
+            <pre class="file-preview" id="filePreview">Select a target, then a file. This is the same text reconkit writes under ~/.reconkit/output/&lt;target&gt;/.</pre>
           </div>
         </div>
       </div>
 
-      <div id="viewInbox" class="view">
+      <div id="viewPrompt" class="view">
         <div class="panel">
           <div class="panel-h">
-            <h2>HUNTER INBOX</h2>
-            <span class="chip" id="inboxMeta">—</span>
+            <h2>PROMPT</h2>
+            <span class="chip" id="llmChip">LLM not loaded</span>
           </div>
-          <p class="mission-lede" id="inboxSession">C1+ notable findings, ranked for triage. Suggested prove technique on the right.</p>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>C</th><th>Sev</th><th>Module</th><th>Title</th><th>Asset</th><th>Score</th><th>Prove</th>
-                </tr>
-              </thead>
-              <tbody id="inboxBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Proofs / Graph / Insights simplified shells reusing API -->
-      <div id="viewProofs" class="view">
-        <div class="panel">
-          <div class="panel-h"><h2>PROOFS</h2><span class="chip" id="proofMeta">—</span></div>
-          <div class="filters">
-            <label>Status
-              <select id="fltProofStatus">
-                <option value="">all</option>
-                <option value="confirmed">confirmed</option>
-                <option value="needs_manual">needs_manual</option>
-                <option value="not_exploitable">not_exploitable</option>
-                <option value="false_positive">false_positive</option>
-                <option value="error">error</option>
-              </select>
+          <p class="mission-lede">
+            Uses <code>config/agent_config.json</code> (Ollama or cloud). Optional: attach the file open in OUTPUT.
+          </p>
+          <textarea id="promptText" rows="6" placeholder="Ask about this target’s recon files…"></textarea>
+          <div class="filters" style="margin-top:8px">
+            <label class="inline">
+              <input type="checkbox" id="chkAttach" checked /> attach current file
             </label>
-            <button type="button" id="btnProofApply" class="btn primary">Apply</button>
+            <button type="button" id="btnSendPrompt" class="btn primary">Send</button>
           </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Status</th><th>Technique</th><th>Target</th><th>Title</th></tr></thead>
-              <tbody id="proofsBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div id="viewGraph" class="view">
-        <div class="panel">
-          <div class="panel-h">
-            <h2>GRAPH</h2>
-            <label class="inline">min score <input id="graphMinScore" type="number" value="40" min="0" max="100" /></label>
-            <button type="button" id="btnGraphReload" class="btn primary">Reload</button>
-            <span class="chip" id="graphStats">0 nodes</span>
-          </div>
-          <div id="graphEmpty" class="graph-empty hidden">No graph data — run recon + reindex first.</div>
-          <table class="data-table">
-            <thead><tr><th>Kind</th><th>Label</th><th>Module</th><th>Score</th></tr></thead>
-            <tbody id="graphBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="viewInsights" class="view">
-        <div class="panel">
-          <div class="panel-h"><h2>INSIGHTS</h2></div>
-          <div id="insightsRoot" class="insights-root">Loading…</div>
+          <pre class="file-preview" id="promptReply">Reply appears here.</pre>
         </div>
       </div>
     </section>
-
-    <!-- Detail drawer -->
-    <aside class="panel detail-rail" id="detailRail">
-      <div class="panel-h"><h2>DETAIL</h2></div>
-      <div id="detailBody" class="detail-body">
-        <p class="muted">Select a module tile or finding row.</p>
-      </div>
-    </aside>
   </main>
 
   <footer class="dash-footer">
     <span id="footerStatus">dashboard</span>
-    <span id="programBadge">program: default</span>
+    <span id="programBadge">cli files</span>
     <span>v3.0.0 · reconkit</span>
   </footer>
 
-  <script src="/app.js?v=3.17-lite"></script>
+  <script src="/app.js?v=3.19-view"></script>
 </body>
 </html>
