@@ -119,34 +119,90 @@ def stage_permute(target: str, outdir: Path) -> None:
 
 
 def stage_ports(target: str, outdir: Path) -> None:
-    """TCP connect scan of in-scope hosts (naabu) then httpx on http ports."""
+    """TCP CONNECT scan of in-scope hosts (naabu, no root) then httpx on http ports."""
     rk = _rk()
     rk.step("In-scope port probe (naabu connect)", phase="ports")
     src = outdir / "resolved.txt"
     if not src.exists() or not src.stat().st_size:
         src = outdir / "subdomains.txt"
-    if not src.exists():
-        rk.warn("no hosts for ports; skipping.")
-        return
+    hosts: list[str] = []
+    if src.exists():
+        hosts = [
+            rk.strip_ansi(ln).strip().split()[0]
+            for ln in src.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if ln.strip()
+        ]
+        hosts = [h for h in hosts if h and rk.host_belongs_to_target(h, target)]
+    if not hosts:
+        apex = rk._normalize_host(target)
+        hosts = [apex]
+        rk.warn(
+            f"no resolved.txt/subdomains.txt — scanning apex only ({apex}). "
+            "Run subdomains,dns first for more hosts."
+        )
+    cap = rk._host_cap(40)
+    hosts = hosts[:cap]
     naabu = rk.which("naabu")
     if not naabu:
         rk.warn("naabu not found; skipping ports (install via setup).")
         return
-    hosts = [ln.strip() for ln in src.read_text(errors="ignore").splitlines() if ln.strip()][: rk._host_cap(80)]
-    r = rk.pipeline(
-        [[naabu, "-silent", "-c", "25", "-p", PORT_LIST, "-timeout", "800"]],
-        input_data=("\n".join(hosts) + "\n").encode(),
-    )
-    lines = [ln.strip() for ln in r.decode(errors="ignore").splitlines() if ln.strip() and ":" in ln]
-    # keep in-scope
+
+    tdir = rk.tool_dir(outdir, "ports")
+    hostfile = tdir / "hosts.txt"
+    raw_out = tdir / "naabu.txt"
+    rk.write_host_list(hostfile, hosts)
+    rk.info(f"naabu CONNECT scan · {len(hosts)} host(s) · ports {PORT_LIST}")
+
+    # Default naabu scan-type is SYN (needs root) and stdin can sit until -irt (3m).
+    # Use -list + CONNECT + skip host-discovery. Hard-kill after 180s.
+    attempts = [
+        [naabu, "-list", str(hostfile), "-p", PORT_LIST,
+         "-scan-type", "c", "-skip-host-discovery",
+         "-silent", "-rate", "150", "-timeout", "1000", "-retries", "1",
+         "-o", str(raw_out)],
+        [naabu, "-list", str(hostfile), "-p", PORT_LIST,
+         "-s", "c", "-silent", "-rate", "150", "-timeout", "1000",
+         "-o", str(raw_out)],
+        [naabu, "-list", str(hostfile), "-p", PORT_LIST,
+         "-silent", "-timeout", "1000", "-o", str(raw_out)],
+    ]
+    last = None
+    for cmd in attempts:
+        last = rk.run(cmd, capture=True, timeout=180)
+        err = (last.stderr or b"").decode(errors="ignore").lower()
+        if last.returncode == 124:
+            rk.warn("naabu hit 180s cap — using whatever it already wrote to tools/ports/naabu.txt")
+            break
+        if last.returncode == 0:
+            break
+        if "unknown" in err or "flag" in err or "invalid" in err:
+            continue
+        break
+
+    blob = ""
+    if raw_out.exists():
+        blob = raw_out.read_text(encoding="utf-8", errors="ignore")
+    if not blob and last is not None:
+        blob = (last.stdout or b"").decode(errors="ignore")
+        rk.save_tool_raw(outdir, "ports", "naabu", blob)
+    lines = [
+        ln.strip() for ln in rk.strip_ansi(blob).splitlines()
+        if ln.strip() and ":" in ln and not ln.strip().startswith("{")
+    ]
     kept = []
     for ln in lines:
         host = ln.split(":")[0]
         if rk.host_belongs_to_target(host, target):
             kept.append(ln)
     _write(rk, outdir / "ports.txt", kept)
-    http_ports = [ln for ln in kept if ln.rsplit(":", 1)[-1] in
-                  {"80", "443", "8080", "8443", "3000", "5000", "8000", "8888", "9000", "9443"}]
+    rk.ok(f"naabu: {len(kept)} open port(s) → tools/ports/naabu.txt · ports.txt")
+
+    http_ports = [
+        ln for ln in kept
+        if ln.rsplit(":", 1)[-1] in {
+            "80", "443", "8080", "8443", "3000", "5000", "8000", "8888", "9000", "9443",
+        }
+    ]
     if http_ports and rk.which("httpx"):
         urls = []
         for hp in http_ports:
@@ -154,10 +210,17 @@ def stage_ports(target: str, outdir: Path) -> None:
             scheme = "https" if port in {"443", "8443", "9443"} else "http"
             urls.append(f"{scheme}://{host}:{port}")
         extra = rk.pipeline(
-            [["httpx", "-silent", "-status-code", "-title", *_headers_httpx()]],
+            [["httpx", "-silent", "-sc", "-title", *_headers_httpx()]],
             input_data=("\n".join(urls) + "\n").encode(),
         )
-        (outdir / "ports_http.txt").write_bytes(rk.strip_ansi_bytes(extra))
+        if not extra.strip():
+            extra = rk.pipeline(
+                [["httpx", "-silent", "-status-code", "-title", *_headers_httpx()]],
+                input_data=("\n".join(urls) + "\n").encode(),
+            )
+        text = rk.strip_ansi(extra.decode("utf-8", errors="replace"))
+        rk.write_utf8(outdir / "ports_http.txt", text + ("" if not text or text.endswith("\n") else "\n"))
+        rk.save_tool_raw(outdir, "ports", "httpx", text)
         rk.ok(f"ports: {len(kept)} open, {len(http_ports)} http-ish → ports_http.txt")
     else:
         rk.ok(f"ports: {len(kept)} open services → ports.txt")

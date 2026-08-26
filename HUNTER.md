@@ -148,6 +148,22 @@ Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have input
 
 Under `~/.reconkit/output/<target>/`:
 
+Per-tool copies (written as soon as that tool finishes — you do not wait for the
+whole phase) live in `tools/<stage>/<tool>.txt`. The merged files below are
+updated after **each** tool, then finalized at stage end.
+
+Example while subfinder is done and amass is still running:
+
+```
+tools/subdomains/subfinder.txt
+subdomains.txt          # already has subfinder names
+```
+
+Amass is last and capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). Kill a hung
+scan with `/stop`.
+
+Under `~/.reconkit/output/<target>/`:
+
 | File | Module |
 |------|--------|
 | `permute_resolved.txt` | permute |

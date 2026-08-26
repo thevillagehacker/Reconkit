@@ -1053,7 +1053,9 @@ def _ensure_log_dir() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _run_capture_live(cmd: list[str], env: dict, check: bool) -> subprocess.CompletedProcess:
+def _run_capture_live(
+    cmd: list[str], env: dict, check: bool, timeout: float | None = None
+) -> subprocess.CompletedProcess:
     """Run a command capturing stdout/stderr while streaming both live (VERBOSE>=3).
 
     Interruptible: /stop kills the process group mid-run.
@@ -1093,8 +1095,14 @@ def _run_capture_live(cmd: list[str], env: dict, check: bool) -> subprocess.Comp
     t_err = threading.Thread(target=_pump, args=(proc.stderr, stderr_chunks, "err"), daemon=True)
     t_out.start()
     t_err.start()
+    t0 = time.time()
+    timed_out = False
     try:
         while proc.poll() is None:
+            if timeout is not None and (time.time() - t0) >= float(timeout):
+                timed_out = True
+                CONTROL._kill_one(proc, force=True)
+                break
             if CONTROL.is_stopped():
                 stopped = True
                 CONTROL._kill_one(proc, force=True)
@@ -1130,7 +1138,7 @@ def _run_capture_live(cmd: list[str], env: dict, check: bool) -> subprocess.Comp
     t_err.join(timeout=5)
     if stopped:
         raise RunStopped("run stopped by operator (/stop)")
-    rc = proc.returncode if proc.returncode is not None else -1
+    rc = 124 if timed_out else (proc.returncode if proc.returncode is not None else -1)
     result = subprocess.CompletedProcess(
         cmd, rc, stdout=b"".join(stdout_chunks), stderr=b"".join(stderr_chunks)
     )
@@ -1140,7 +1148,7 @@ def _run_capture_live(cmd: list[str], env: dict, check: bool) -> subprocess.Comp
 
 
 def run(cmd: list[str], check: bool = False, env: dict | None = None,
-        capture: bool = False) -> subprocess.CompletedProcess:
+        capture: bool = False, timeout: float | None = None) -> subprocess.CompletedProcess:
     """Run an external tool. Honors /pause and /stop (kills process group)."""
     from run_control import CONTROL, RunStopped, run_interruptible
 
@@ -1158,10 +1166,10 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
             # lost — it's logged to DEBUG_LOG every time, echoed as preview when
             # VERBOSE>=2, and fully streamed live when VERBOSE>=3.
             if VERBOSE >= VERBOSE_LIVE:
-                result = _run_capture_live(cmd, merged_env, check)
+                result = _run_capture_live(cmd, merged_env, check, timeout=timeout)
             else:
                 result = run_interruptible(
-                    cmd, env=merged_env, capture=True, check=check
+                    cmd, env=merged_env, capture=True, check=check, timeout=timeout
                 )
             elapsed = time.time() - t0
 
@@ -1183,7 +1191,9 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
             return result
 
         # Non-capturing: still interruptible so /stop works
-        result = run_interruptible(cmd, env=merged_env, capture=False, check=check)
+        result = run_interruptible(
+            cmd, env=merged_env, capture=False, check=check, timeout=timeout
+        )
         elapsed = time.time() - t0
         debug(f"exit={result.returncode}  time={elapsed:.1f}s  (live output above, not captured)")
         return result
@@ -1292,6 +1302,30 @@ def write_lines(path: Path, data: bytes) -> int:
     lines = sorted(set(ln.strip() for ln in text.splitlines() if ln.strip()))
     write_utf8(path, "\n".join(lines) + ("\n" if lines else ""))
     return len(lines)
+
+
+def tool_dir(outdir: Path, stage: str) -> Path:
+    """Per-tool files: ~/.reconkit/output/<target>/tools/<stage>/<tool>.txt"""
+    p = outdir / "tools" / stage
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def save_tool_raw(outdir: Path, stage: str, tool: str, data: bytes | str, suffix: str = ".txt") -> Path:
+    dest = tool_dir(outdir, stage) / f"{tool}{suffix}"
+    if isinstance(data, bytes):
+        text = strip_ansi(data.decode("utf-8", errors="replace"))
+    else:
+        text = strip_ansi(data)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    write_utf8(dest, text)
+    return dest
+
+
+def flush_merge(path: Path, items) -> int:
+    """Rewrite the canonical merge file so it is visible before the stage ends."""
+    return write_host_list(path, sorted(items) if not isinstance(items, list) else items)
 
 
 # --------------------------------------------------------------------------- #
@@ -2006,18 +2040,33 @@ def require_scope_or_exit(target: str) -> None:
 # installed, rather than crashing the whole run.
 # --------------------------------------------------------------------------- #
 
+def _amass_timeout_sec() -> int:
+    try:
+        return max(30, min(int(os.environ.get("RECON_AMASS_TIMEOUT") or "180"), 900))
+    except (TypeError, ValueError):
+        return 180
+
+
 def _run_amass(path: str, target: str):
-    """Amass v3/v4 uses -passive; v5 is passive by default and may reject old flags."""
+    """Passive amass only, with a hard process cap (default 180s).
+
+    Never run `amass enum -d` with no timeout — that is the hours-long hang.
+    """
+    cap = _amass_timeout_sec()
+    warn(f"amass: hard cap {cap}s (set RECON_AMASS_TIMEOUT to change, max 900)")
     attempts = [
         [path, "enum", "-passive", "-d", target, "-timeout", "2"],
         [path, "enum", "-d", target, "-timeout", "2"],
-        [path, "enum", "-d", target],
+        [path, "enum", "-passive", "-d", target],
     ]
     last = None
     for cmd in attempts:
-        last = run(cmd, capture=True)
+        last = run(cmd, capture=True, timeout=cap)
         out = (last.stdout or b"").strip()
         err = (last.stderr or b"").decode(errors="ignore").lower()
+        if last.returncode == 124:
+            warn("amass hit the time cap — keeping partial stdout")
+            return last
         if last.returncode == 0 and out:
             return last
         if last.returncode == 0:
@@ -2035,24 +2084,32 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
     target_lower = target.lower()
     collected: set[str] = set()
 
-    def add(data: bytes):
+    def ingest(tool: str, data: bytes) -> int:
+        hosts: list[str] = []
         for ln in data.decode(errors="ignore").splitlines():
             host = _normalize_host(ln)
-            if host and is_valid_hostname(host):
-                collected.add(host)
+            if host and is_valid_hostname(host) and host_belongs_to_target(host, target_lower):
+                hosts.append(host)
+        save_tool_raw(outdir, "subdomains", tool, "\n".join(hosts))
+        before = len(collected)
+        collected.update(hosts)
+        flush_merge(subs_file, collected)
+        added = len(collected) - before
+        ok(f"{tool}: {len(hosts)} name(s), {added} new → tools/subdomains/{tool}.txt · {subs_file.name}")
+        return added
 
+    # Fast tools first so subdomains.txt exists before amass (which we cap).
     tools = [
         ("subfinder", ["-d", target, "-all", "-silent", "-timeout", "60"]),
-        ("amass", ["enum", "-passive", "-d", target, "-timeout", "2"]),  # minutes (v3/v4)
         ("assetfinder", ["-subs-only", target]),
         ("findomain", ["-t", target, "-q"]),
     ]
     chaos_key = os.environ.get("PDCP_API_KEY") or os.environ.get("CHAOS_KEY")
     if chaos_key:
-        tools.insert(2, ("chaos", ["-key", chaos_key, "-d", target, "-silent"]))
+        tools.insert(1, ("chaos", ["-key", chaos_key, "-d", target, "-silent"]))
     if os.environ.get("GITHUB_TOKEN") and which("github-subdomains"):
         tools.append(("github-subdomains", ["-d", target]))
-    # Passive web sources also shown on the checklist
+    tools.append(("amass", ["enum", "-passive", "-d", target, "-timeout", "2"]))
     extra_tools = ["crt.sh", "wayback", "hackertarget"]
     checklist = None
     try:
@@ -2079,9 +2136,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
             result = _run_amass(path, target)
         else:
             result = run([path] + args, capture=True)
-        before = len(collected)
-        add(result.stdout or b"")
-        added = len(collected) - before
+        added = ingest(binary, result.stdout or b"")
         rc = result.returncode
         if checklist:
             checklist.finish_tool(binary, added)
@@ -2089,26 +2144,24 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
             reason = f"exit={rc}" if rc not in (0, None) else "empty/no new hosts"
             warn(f"{binary} returned 0 new subdomains ({reason}) — see {DEBUG_LOG} "
                  f"(common causes: missing API key, rate limit, network block, or tool not installed).")
-        elif not checklist:
-            ok(f"{binary} contributed {added} new subdomain(s)")
 
     curl = which("curl")
     if curl:
-        # Certificate transparency (crt.sh)
         if checklist:
             checklist.start_tool("crt.sh")
         before = len(collected)
         r = run([curl, "-s", "--max-time", "30", "--retry", "2",
                  f"https://crt.sh/?q=%25.{target}&output=json"], capture=True)
+        save_tool_raw(outdir, "subdomains", "crtsh", r.stdout or b"", suffix=".json")
         try:
             entries = json.loads(r.stdout or b"[]")
+            blob = b""
             for e in entries:
                 if not isinstance(e, dict):
                     continue
                 for name in str(e.get("name_value", "")).splitlines():
-                    host = _normalize_host(name.replace("*.", ""))
-                    if host and is_valid_hostname(host):
-                        collected.add(host)
+                    blob += (name.replace("*.", "") + "\n").encode()
+            ingest("crtsh", blob)
         except Exception:
             if checklist is None:
                 warn(f"crt.sh response wasn't valid JSON (likely rate-limited or timed out) — "
@@ -2116,26 +2169,28 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
         if checklist:
             checklist.finish_tool("crt.sh", len(collected) - before)
 
-        # Wayback machine
         if checklist:
             checklist.start_tool("wayback")
         before = len(collected)
         r = run([curl, "-s", "--max-time", "30", "--retry", "2",
                  f"https://web.archive.org/cdx/search/cdx?url=*.{target}/*&output=text&fl=original&collapse=urlkey"],
                 capture=True)
+        save_tool_raw(outdir, "subdomains", "wayback", r.stdout or b"")
+        hosts_wb = []
         for ln in (r.stdout or b"").decode(errors="ignore").splitlines():
             host = _host_from_url_line(ln)
-            if host and is_valid_hostname(host):
-                collected.add(host)
+            if host:
+                hosts_wb.append(host)
+        ingest("wayback", ("\n".join(hosts_wb) + "\n").encode())
         if checklist:
             checklist.finish_tool("wayback", len(collected) - before)
 
-        # HackerTarget passive DNS
         if checklist:
             checklist.start_tool("hackertarget")
         before = len(collected)
         r = run([curl, "-s", "--max-time", "20", "--retry", "1",
                  f"https://api.hackertarget.com/hostsearch/?q={target}"], capture=True)
+        save_tool_raw(outdir, "subdomains", "hackertarget", r.stdout or b"")
         body = (r.stdout or b"").decode(errors="ignore")
         if "error" in body.lower() or "API count exceeded" in body:
             if checklist:
@@ -2143,10 +2198,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
             else:
                 warn("HackerTarget API returned an error/rate-limit message — skipping its results.")
         else:
-            for ln in body.splitlines():
-                host = _normalize_host(ln.split(",")[0])
-                if host and is_valid_hostname(host):
-                    collected.add(host)
+            ingest("hackertarget", r.stdout or b"")
             if checklist:
                 checklist.finish_tool("hackertarget", len(collected) - before)
     else:
@@ -2160,7 +2212,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
     collected = {h for h in collected if host_belongs_to_target(h, target_lower)}
     _maybe_filter_wildcard_dns(target, collected, outdir)
     write_host_list(subs_file, sorted(collected))
-    ok(f"{len(collected)} unique subdomains -> {subs_file}")
+    ok(f"{len(collected)} unique subdomains -> {subs_file}  (per-tool: {tool_dir(outdir, 'subdomains')})")
     return subs_file
 
 
@@ -2416,6 +2468,19 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     collected: set[str] = set()
     info(f"🕷️ crawling {len(hosts)} host(s) in-scope for {target}…")
 
+    def ingest_urls(tool: str, lines) -> int:
+        raw = [strip_ansi(str(x)).strip() for x in lines if str(x).strip()]
+        kept = filter_urls_to_target(raw, target)
+        save_tool_raw(outdir, "crawl", tool, "\n".join(kept))
+        before = len(collected)
+        collected.update(kept)
+        # Canonical file grows after each crawler — no wait for the whole phase.
+        collapsed = collapse_url_shapes(sorted(collected))
+        write_utf8(urls_file, "\n".join(collapsed) + ("\n" if collapsed else ""))
+        added = len(collected) - before
+        ok(f"{tool}: {len(kept)} in-scope URL(s), {added} new → tools/crawl/{tool}.txt · urls.txt")
+        return added
+
     crawl_tools = ["katana", "gospider", "hakrawler", "gau", "waybackurls"]
     checklist = None
     try:
@@ -2444,7 +2509,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
                 [["katana", "-silent", "-d", _katana_depth()]],
                 input_data=clean_input,
             )
-        collected.update(strip_ansi(result.decode(errors="ignore")).splitlines())
+        ingest_urls("katana", strip_ansi(result.decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("katana", len(collected) - before)
     else:
@@ -2466,11 +2531,13 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     if gospider and hosts:
         if checklist:
             checklist.start_tool("gospider")
+        gs_buf: list[str] = []
         def _gs(host):
             _rate_delay()
             r = run([gospider, "-s", host, "-c", "10", "-d", "3", "-q"], capture=True)
-            collected.update(_extract_urls((r.stdout or b"").decode(errors="ignore")))
-        added = _host_loop("gospider", hosts[:crawl_n], _gs)
+            gs_buf.extend(_extract_urls((r.stdout or b"").decode(errors="ignore")))
+        _host_loop("gospider", hosts[:crawl_n], _gs)
+        added = ingest_urls("gospider", gs_buf)
         if checklist:
             checklist.finish_tool("gospider", added)
     else:
@@ -2483,11 +2550,13 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     if hakrawler and hosts:
         if checklist:
             checklist.start_tool("hakrawler")
+        hk_buf: list[str] = []
         def _hk(host):
             _rate_delay()
             r = pipeline([["hakrawler", "-d", "3", "-subs", "-u"]], input_data=(host + "\n").encode())
-            collected.update(r.decode(errors="ignore").splitlines())
-        added = _host_loop("hakrawler", hosts[:crawl_n], _hk)
+            hk_buf.extend(r.decode(errors="ignore").splitlines())
+        _host_loop("hakrawler", hosts[:crawl_n], _hk)
+        added = ingest_urls("hakrawler", hk_buf)
         if checklist:
             checklist.finish_tool("hakrawler", added)
     else:
@@ -2506,7 +2575,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         err = (r.stderr or b"").decode(errors="ignore").lower()
         if r.returncode != 0 and ("unknown" in err or "flag" in err):
             r = run([gau, "--threads", "10", target], capture=True)
-        collected.update(strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
+        ingest_urls("gau", strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("gau", len(collected) - before)
     else:
@@ -2521,7 +2590,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
             checklist.start_tool("waybackurls")
         before = len(collected)
         r = run([waybackurls, target], capture=True)
-        collected.update(strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
+        ingest_urls("waybackurls", strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("waybackurls", len(collected) - before)
     else:

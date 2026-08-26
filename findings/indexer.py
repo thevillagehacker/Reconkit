@@ -236,6 +236,9 @@ def index_target(target: str, output_dir: Path | None = None) -> tuple[TargetSum
         rel_posix = rel.replace("\\", "/")
         if rel_posix.startswith("proofs/") or "/proofs/" in rel_posix:
             continue
+        # Per-tool copies live under tools/ — merged files are the index source.
+        if rel_posix.startswith("tools/") or "/tools/" in rel_posix:
+            continue
         if path.stat().st_size > 8_000_000:
             continue
 

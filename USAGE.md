@@ -382,6 +382,15 @@ python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 
 Output: `~/.reconkit/output/example.com/`
 
+Each tool also writes as soon as it finishes:
+
+```
+~/.reconkit/output/example.com/tools/subdomains/subfinder.txt
+~/.reconkit/output/example.com/tools/crawl/katana.txt
+```
+
+The merged `subdomains.txt` / `urls.txt` are updated after **every** tool (you do not wait for amass). Amass is last and killed after 180s (`RECON_AMASS_TIMEOUT`). `/stop` kills a hung process.
+
 ### Shell shortcuts
 
 ```text

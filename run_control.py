@@ -324,6 +324,7 @@ def run_interruptible(
     input_data: bytes | None = None,
     check: bool = False,
     poll: float = 0.25,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """
     Run a tool with pause/stop awareness. /stop and Ctrl+C kill the process group.
@@ -352,7 +353,9 @@ def run_interruptible(
     stderr_chunks: list[bytes] = []
     pumps: list[threading.Thread] = []
     aborted = False
+    timed_out = False
     last_beat = time.time()
+    t0 = time.time()
 
     def _heartbeat() -> None:
         nonlocal last_beat
@@ -406,6 +409,14 @@ def run_interruptible(
                 pass
 
         while proc.poll() is None:
+            if timeout is not None and (time.time() - t0) >= float(timeout):
+                timed_out = True
+                CONTROL._kill_one(proc, force=True)
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    CONTROL._kill_one(proc, force=True)
+                break
             if CONTROL.is_stopped():
                 aborted = True
                 CONTROL._kill_one(proc)
@@ -435,7 +446,10 @@ def run_interruptible(
             raise RunStopped("run stopped by operator (/stop)")
         stdout = b"".join(stdout_chunks)
         stderr = b"".join(stderr_chunks)
-        rc = proc.returncode if proc.returncode is not None else -1
+        if timed_out:
+            rc = 124
+        else:
+            rc = proc.returncode if proc.returncode is not None else -1
         result = subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr=stderr)
         if check and rc != 0:
             raise subprocess.CalledProcessError(rc, cmd, output=result.stdout, stderr=result.stderr)
