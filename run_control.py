@@ -340,6 +340,10 @@ def run_interruptible(
         kwargs["stderr"] = subprocess.PIPE
     if input_data is not None:
         kwargs["stdin"] = subprocess.PIPE
+    else:
+        # Never inherit the parent stdin. ProjectDiscovery tools treat a
+        # non-TTY pipe as a host list and wait until -irt (often 3 minutes).
+        kwargs["stdin"] = subprocess.DEVNULL
 
     # New session/process group so killpg terminates tool children (nuclei workers)
     if os.name == "nt":

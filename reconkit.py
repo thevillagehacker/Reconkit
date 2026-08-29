@@ -534,8 +534,9 @@ def _xss_unique_marker_filter(lines: list[str]) -> list[str]:
         return lines
     cap = min(len(urls), 150)
     try:
+        from hunter.session import httpx_h_flags
         hit = pipeline(
-            [["qsreplace", marker], ["httpx", "-silent", "-ms", marker, "-timeout", "8"]],
+            [["qsreplace", marker], ["httpx", "-silent", "-ms", marker, "-timeout", "8", *httpx_h_flags()]],
             input_data=("\n".join(urls[:cap]) + "\n").encode(),
         )
     except Exception:
@@ -2261,8 +2262,9 @@ def _filter_wildcard_http(alive_file: Path, outdir: Path, target: str) -> None:
         return
     nonce = lines[0]
     try:
+        from hunter.session import httpx_h_flags
         probe = pipeline(
-            [["httpx", "-silent", "-title", "-status-code", "-timeout", "10"]],
+            [["httpx", "-silent", "-title", "-status-code", "-timeout", "10", *httpx_h_flags()]],
             input_data=(nonce + "\n").encode(),
         )
     except Exception:

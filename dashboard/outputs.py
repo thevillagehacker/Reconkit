@@ -89,13 +89,27 @@ def _classify(rel: str) -> tuple[str, str, str]:
     return phase, "merged", "merged"
 
 
-def list_output_files(target: str) -> dict[str, Any]:
-    tdir = (OUTPUT_DIR / target.replace("*", "_")).resolve()
+def _target_dir(target: str) -> tuple[Path | None, str]:
+    """Jail target name under OUTPUT_DIR. Reject .., slashes, absolute names."""
     base = OUTPUT_DIR.resolve()
+    name = str(target or "").replace("*", "_").replace("\\", "/").strip("/")
+    if not name or name in {".", ".."} or "/" in name:
+        return None, "invalid target"
+    p = Path(name)
+    if p.is_absolute() or ".." in p.parts:
+        return None, "invalid target"
+    tdir = (base / name).resolve()
     try:
         tdir.relative_to(base)
     except ValueError:
-        return {"error": "invalid target", "files": []}
+        return None, "invalid target"
+    return tdir, ""
+
+
+def list_output_files(target: str) -> dict[str, Any]:
+    tdir, err = _target_dir(target)
+    if err or tdir is None:
+        return {"error": err or "invalid target", "files": []}
     if not tdir.is_dir():
         return {"target": target, "outdir": str(tdir), "files": [], "phases": [], "tools": []}
 
@@ -115,7 +129,8 @@ def list_output_files(target: str) -> dict[str, Any]:
         tools.add(tool)
         size = path.stat().st_size
         lines = 0
-        if size < 4_000_000 and path.suffix.lower() in {".txt", ".json", ".jsonl", ".md", ".log", ""}:
+        # Line-count only small text files — a 3 MB urls.txt would stall the file list.
+        if size < 512_000 and path.suffix.lower() in {".txt", ".json", ".jsonl", ".md", ".log", ""}:
             try:
                 lines = sum(1 for ln in path.open("r", encoding="utf-8", errors="replace") if ln.strip())
             except Exception:
@@ -151,7 +166,9 @@ def raw_url(target: str, rel: str) -> str:
 
 def resolve_output_path(target: str, rel: str) -> tuple[Path | None, str]:
     """Return (absolute path, error). error is empty on success."""
-    tdir = (OUTPUT_DIR / target.replace("*", "_")).resolve()
+    tdir, err = _target_dir(target)
+    if err or tdir is None:
+        return None, err or "invalid target"
     rel_path = Path(str(rel).replace("\\", "/"))
     if ".." in rel_path.parts or rel_path.is_absolute():
         return None, "invalid path"
@@ -188,7 +205,13 @@ def read_output_file(target: str, rel: str, max_chars: int = 200_000) -> dict[st
     preview_cap = 2_000_000
     if size > preview_cap:
         out["too_large"] = True
+        out["truncated"] = True
         out["error"] = "file too large to preview inline"
+        try:
+            with full.open("r", encoding="utf-8-sig", errors="replace") as fh:
+                out["content"] = fh.read(max_chars)
+        except Exception:
+            out["content"] = ""
         return out
     text = full.read_text(encoding="utf-8-sig", errors="replace")
     out["content"] = text[:max_chars]

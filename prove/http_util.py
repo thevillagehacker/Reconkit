@@ -9,9 +9,15 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 
-def inject_query_marker(url: str, marker: str, prefer_params: list[str] | None = None) -> str:
+def inject_query_marker(
+    url: str,
+    marker: str,
+    prefer_params: list[str] | None = None,
+    *,
+    replace_all: bool = False,
+) -> str:
     """
-    Put marker into the first query parameter value (or append ?rk=marker).
+    Put marker into query parameter value(s) (or append ?rk_prove=marker).
     Does not invent path traversal or new hosts.
     """
     prefer = prefer_params or []
@@ -22,6 +28,8 @@ def inject_query_marker(url: str, marker: str, prefer_params: list[str] | None =
         q = list(parse_qsl(parts.query, keep_blank_values=True))
         if not q:
             q = [("rk_prove", marker)]
+        elif replace_all and not prefer:
+            q = [(k, marker) for k, _v in q]
         else:
             replaced = False
             for i, (k, _v) in enumerate(q):
@@ -29,9 +37,10 @@ def inject_query_marker(url: str, marker: str, prefer_params: list[str] | None =
                     continue
                 q[i] = (k, marker)
                 replaced = True
-                break
+                if not prefer:
+                    break
+                # preferred name: replace every matching key
             if not replaced:
-                # first param
                 k, _ = q[0]
                 q[0] = (k, marker)
         new_query = urlencode(q, doseq=True)

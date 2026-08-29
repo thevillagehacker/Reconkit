@@ -38,10 +38,16 @@ def run_prompt(
     meta: dict[str, Any] = {}
     if target and path:
         rec = read_output_file(target, path, max_chars=40_000)
-        if rec.get("error"):
+        # too_large still returns a head of the file — do not fail the prompt.
+        if rec.get("error") and not rec.get("too_large") and not rec.get("content"):
             return {"ok": False, "error": rec["error"]}
         attached = rec.get("content") or ""
-        meta = {"path": rec.get("path"), "phase": rec.get("phase"), "tool": rec.get("tool")}
+        meta = {
+            "path": rec.get("path"),
+            "phase": rec.get("phase"),
+            "tool": rec.get("tool"),
+            "truncated": bool(rec.get("truncated") or rec.get("too_large")),
+        }
     try:
         from agents.llm import LLMClient
         client = LLMClient()

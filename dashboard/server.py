@@ -196,7 +196,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _send_raw(self, path: str) -> None:
         """GitHub-style raw file: GET /raw/<target>/<relative-path> as text/plain."""
-        rest = unquote(path[len("/raw/"):]).lstrip("/")
+        rest = path[len("/raw/"):].lstrip("/")
         if "/" not in rest:
             self._send_json({"error": "usage: /raw/<target>/<path>"}, 400)
             return
@@ -214,18 +214,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }, 413)
             return
         data = full.read_bytes()
-        # Prefer UTF-8 text in the browser; fallback latin-1 so bytes always display.
+        # Prefer UTF-8 text in the browser; fallback so bytes always display.
         try:
             data.decode("utf-8")
             ctype = "text/plain; charset=utf-8"
         except UnicodeDecodeError:
             ctype = "application/octet-stream"
+        fname = full.name.replace('"', "").replace("\r", "").replace("\n", "")
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Content-Disposition", f'inline; filename="{full.name}"')
+        self.send_header("Content-Disposition", f'inline; filename="{fname}"')
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Reconkit-Disk-Path", str(full))
+        try:
+            self.send_header("X-Reconkit-Disk-Path", str(full))
+        except (UnicodeEncodeError, UnicodeError):
+            pass
         self.end_headers()
         self.wfile.write(data)
 
@@ -517,27 +522,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/targets":
-            idx = _get_index(force=force)
-            targets = dict(idx.get("targets") or {})
+            # Disk dirs only — do not wait on the findings index for the OUTPUT viewer.
+            fp = output_fingerprint()
+            rows = []
             for t in list_targets():
-                targets.setdefault(t, {
+                rows.append({
                     "target": t,
                     "outdir": str(OUTPUT_DIR / t),
                     "finding_count": 0,
                     "record_count": 0,
                 })
-            # normalize counts for UI
-            rows = []
-            for info in targets.values():
-                row = dict(info)
-                c = row.get("finding_count") or row.get("record_count") or 0
-                row["finding_count"] = c
-                row["record_count"] = c
-                rows.append(row)
-            rows.sort(key=lambda x: x.get("target", ""))
             self._send_json({
                 "targets": rows,
-                "output_fingerprint": idx.get("output_fingerprint"),
+                "output_fingerprint": fp.get("token"),
             })
             return
 
@@ -947,15 +944,21 @@ def run_server(
     refresh: bool = True,
 ) -> None:
     if refresh:
-        print(f"[dashboard] indexing {OUTPUT_DIR} …")
-        idx = _force_rebuild()
-        print(
-            f"[dashboard] {idx.get('target_count', 0)} target(s), "
-            f"{idx.get('finding_count', 0)} recon record(s)  "
-            f"fp={idx.get('output_fingerprint')}"
-        )
+        def _index_bg() -> None:
+            try:
+                print(f"[dashboard] indexing {OUTPUT_DIR} in background …")
+                idx = _force_rebuild()
+                print(
+                    f"[dashboard] index ready: {idx.get('target_count', 0)} target(s), "
+                    f"{idx.get('finding_count', 0)} recon record(s)  "
+                    f"fp={idx.get('output_fingerprint')}"
+                )
+            except Exception as e:
+                print(f"[dashboard] background index failed: {e}")
+
+        threading.Thread(target=_index_bg, daemon=True, name="dash-index").start()
     else:
-        _get_index(force=False)
+        threading.Thread(target=lambda: _get_index(force=False), daemon=True, name="dash-index").start()
 
     httpd = ThreadingHTTPServer((host, port), DashboardHandler)
     print(f"[dashboard] listening on {host}:{port}")

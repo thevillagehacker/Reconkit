@@ -62,11 +62,17 @@ async function loadTargets() {
     n++;
     const li = document.createElement("li");
     if (state.target === name) li.classList.add("active");
-    const count = t.finding_count ?? "";
-    li.innerHTML = `<span>${esc(name)}</span><span class="meta">${count}</span>`;
+    li.innerHTML = `<span>${esc(name)}</span>`;
     li.onclick = () => {
       state.target = name;
+      state.filePath = "";
+      state.fileContent = "";
+      setRawLink("", false);
       if ($("missionBanner")) $("missionBanner").textContent = name;
+      if ($("previewPath")) $("previewPath").textContent = "select a file";
+      if ($("filePreview")) {
+        $("filePreview").textContent = "Select a file from the list.";
+      }
       $("btnAllTargets").classList.remove("active");
       loadTargets();
       refreshAll();
@@ -177,7 +183,7 @@ function renderFileList() {
       <td>${esc(f.phase)}</td>
       <td>${esc(f.tool)}</td>
       <td>${esc(f.path)}</td>
-      <td>${esc(f.lines)}</td>
+      <td>${Number(f.lines) > 0 ? esc(f.lines) : esc(fmtBytes(f.size))}</td>
     </tr>
   `).join("") || `<tr><td colspan="4" class="muted">No files yet — run a scan</td></tr>`;
   $("fileBody").querySelectorAll("tr[data-path]").forEach((tr) => {
@@ -240,6 +246,10 @@ async function sendPrompt() {
     return;
   }
   const attach = $("chkAttach") && $("chkAttach").checked;
+  if (attach && (!state.target || !state.filePath)) {
+    $("promptReply").textContent = "Open a file in OUTPUT first, or uncheck attach.";
+    return;
+  }
   $("promptReply").textContent = "…";
   $("btnSendPrompt").disabled = true;
   try {
@@ -297,18 +307,26 @@ function wire() {
   });
   $("btnAllTargets").onclick = () => {
     state.target = "";
+    state.filePath = "";
+    state.fileContent = "";
+    setRawLink("", false);
     if ($("missionBanner")) $("missionBanner").textContent = "CLI output viewer";
+    if ($("previewPath")) $("previewPath").textContent = "select a file";
     loadTargets();
     refreshAll();
   };
   $("targetSearch").oninput = () => loadTargets();
   $("btnRefresh").onclick = () => refreshAll();
-  $("btnOutputApply").onclick = () => {
+  const applyFileFilters = () => {
     state.phase = $("fltPhase").value;
     state.tool = $("fltTool").value;
     state.fileQ = $("fltFileQ").value;
     renderFileList();
   };
+  $("btnOutputApply").onclick = applyFileFilters;
+  $("fltPhase").onchange = applyFileFilters;
+  $("fltTool").onchange = applyFileFilters;
+  $("fltFileQ").oninput = applyFileFilters;
   $("btnAskFile").onclick = () => {
     if (!state.filePath) {
       alert("Open a file in OUTPUT first.");
@@ -327,5 +345,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   wire();
   await refreshAll();
   startPoll();
-  setView("output");
 });

@@ -31,7 +31,13 @@ def validate(item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         }
 
     marker = "rkx" + hashlib.sha1(url.encode()).hexdigest()[:10]
-    test_url = inject_query_marker(url, marker)
+    param = _reflected_param(asset) or _reflected_param(str(item.get("evidence") or ""))
+    test_url = inject_query_marker(
+        url,
+        marker,
+        prefer_params=[param] if param else None,
+        replace_all=not param,
+    )
     timeout = float(policy.get("request_timeout_sec") or 15)
     ua = str(policy.get("user_agent") or "reconkit-prove/2.2.0")
     base = http_get(url, timeout=timeout, user_agent=ua)
@@ -136,6 +142,17 @@ def _classify_context(body: str, marker: str) -> str:
     if "&lt;" in marker or "&#" in marker:
         return "encoded"
     return "html_body"
+
+
+def _reflected_param(text: str) -> str | None:
+    """kxss/dalfox lines often end with `> param` or `param: name`."""
+    blob = (text or "").strip()
+    m = re.search(
+        r"(?:[>\u003e]|param(?:eter)?\s*[:=])\s*([A-Za-z0-9_\-]{1,80})\s*$",
+        blob,
+        re.I,
+    )
+    return m.group(1) if m else None
 
 
 def _extract_url(text: str) -> str | None:

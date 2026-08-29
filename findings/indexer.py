@@ -920,13 +920,39 @@ def output_fingerprint(output_dir: Path | None = None) -> dict[str, Any]:
                 newest = max(newest, tdir.stat().st_mtime)
             except OSError:
                 pass
-            # One directory level only — do not walk screenshots/ trees on every poll.
+            # Top-level files plus tools/<stage>/* and proofs/* so per-tool
+            # writes (tools/crawl/katana.txt) change the LIVE fingerprint.
+            # Do not rglob screenshots/.
             try:
                 with os.scandir(tdir) as it:
                     for ent in it:
                         file_count += 1
                         try:
                             newest = max(newest, ent.stat().st_mtime)
+                        except OSError:
+                            pass
+                        if not ent.is_dir() or ent.name not in ("tools", "proofs"):
+                            continue
+                        try:
+                            with os.scandir(ent.path) as stages:
+                                for stg in stages:
+                                    file_count += 1
+                                    try:
+                                        newest = max(newest, stg.stat().st_mtime)
+                                    except OSError:
+                                        pass
+                                    if not stg.is_dir():
+                                        continue
+                                    try:
+                                        with os.scandir(stg.path) as files:
+                                            for f in files:
+                                                file_count += 1
+                                                try:
+                                                    newest = max(newest, f.stat().st_mtime)
+                                                except OSError:
+                                                    pass
+                                    except OSError:
+                                        pass
                         except OSError:
                             pass
             except OSError:

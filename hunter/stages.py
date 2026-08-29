@@ -164,7 +164,7 @@ def stage_ports(target: str, outdir: Path) -> None:
          "-s", "c", "-silent", "-rate", "150", "-timeout", "1000",
          "-o", str(raw_out)],
         [naabu, "-list", str(hostfile), "-p", PORT_LIST,
-         "-silent", "-timeout", "1000", "-o", str(raw_out)],
+         "-scan-type", "c", "-silent", "-timeout", "1000", "-o", str(raw_out)],
     ]
     last = None
     for cmd in attempts:
