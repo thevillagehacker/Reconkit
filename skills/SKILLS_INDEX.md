@@ -1,4 +1,4 @@
-﻿# reconkit Agent Skills Index (v3.0 skill suite)
+# reconkit Agent Skills Index (v3.0 skill suite)
 
 Compiled from patterns in local clones under `git_skills/`
 (Bug-Bounty-Agents, bughunter-ai, claude-bug-bounty, Claude-BugHunter)
@@ -13,9 +13,9 @@ via `agents/skills.py`).
 |-----------------|--------------|
 | 40+ loose personas, no shared memory | One pack, role-routed injection, shared confidence model |
 | Heavy payload/wordlist skills | Methodology + reconkit tools only (no spray/webshell packs) |
-| Parallel agent thrash on weak hardware | Batch â‰¤3 modules, kill-fast, progressive skill load |
-| â€œExploitâ€ = free bash | **Confidence tiers** + safe prove + PoC templates for humans |
-| High FP → wasted LLM turns | **7-gate eval** before escalate / report / PoC write |
+| Parallel agent thrash on weak hardware | Batch <=3 modules, kill-fast, progressive skill load |
+| "Exploit" = free bash | **Confidence tiers** + safe prove + PoC templates for humans |
+| High FP -> wasted LLM turns | **7-gate eval** before escalate / report / PoC write |
 
 ## Skills
 
@@ -42,7 +42,7 @@ Loaded only when modules/context match (saves tokens):
 | `reconkit-vuln-takeover` | `dns`, `nuclei`, `takeover_plus` | takeover, cname, dangling, nxdomain, herokuapp, github.io |
 | `reconkit-vuln-secrets` | `js`, `jsintel`, `cloud`, `gitrecon` | secret, AKIA, aws_key, api_key, private key, `-----BEGIN` |
 
-**Example:** run with `--modules xss` → surface set may include `reconkit-vuln-xss`
+**Example:** run with `--modules xss` -> surface set may include `reconkit-vuln-xss`
 (and up to two more if other signals match). Cap is always **3**.
 
 ## Env
@@ -78,7 +78,7 @@ Never claim C3/C4 from nuclei alone. Escalate tools only when C improves.
 | Tier | Typical reconkit action |
 |------|-------------------------|
 | C0 | Drop; do not queue prove |
-| C1 | `/findings reindex` → `/prove queue` or manual |
+| C1 | `/findings reindex` -> `/prove queue` or manual |
 | C2 | `/prove run` status `confirmed` |
 | C3 | Human impact notes under program RoE |
 | C4 | `/critic` + `/report` + submit |
@@ -86,11 +86,11 @@ Never claim C3/C4 from nuclei alone. Escalate tools only when C improves.
 ## Pipeline (max efficiency)
 
 ```
-scope → recon (ordered modules) → index/score
-     → fp-eval (C0/C1 filter)
-     → prove safe (C2)
-     → exploit-prove PoC draft (human/HITL for C3)
-     → triage-gate → report
+scope -> recon (ordered modules) -> index/score
+     -> fp-eval (C0/C1 filter)
+     -> prove safe (C2)
+     -> exploit-prove PoC draft (human/HITL for C3)
+     -> triage-gate -> report
 ```
 
 ### Copy-paste example
@@ -98,7 +98,7 @@ scope → recon (ordered modules) → index/score
 ```bash
 cd path/to/Reconkit
 
-# Scope + LLM (local or cloud â€” skills identical)
+# Scope + LLM (local or cloud -- skills identical)
 python reconkit.py scope add example.com
 python recon_agents.py config set --provider ollama \
   --base-url http://192.168.1.4:11434 --model qwen3:8b
@@ -115,12 +115,12 @@ python recon_prove.py run --target example.com
 # Shell report path
 # /report example.com
 # /critic example.com
-# /dashboard   → Proofs + Graph + Insights
+# /dashboard   -> Proofs + Graph + Insights
 ```
 
 ## Role routing (implementation)
 
-Source of truth: `agents/skills.py` → `ROLE_SKILLS`, `MODULE_SURFACE`,
+Source of truth: `agents/skills.py` -> `ROLE_SKILLS`, `MODULE_SURFACE`,
 `SURFACE_SKILLS`, `MAX_SURFACE_SKILLS = 3`.
 
 | Role | Core skills |
@@ -135,8 +135,8 @@ Pre-eval (no LLM tokens): `agents/eval.py` before analyst report.
 
 ## See also
 
-- **[README.md](README.md)** â€” overview + design principles  
-- **[USAGE.md Â§21](../USAGE.md)** â€” full usage examples  
-- **[OPERATIONS.md Â§14](../OPERATIONS.md)** â€” CLI catalog  
-- **[WORKFLOW.md Phase M](../WORKFLOW.md)** â€” ordered hunt phase  
-- **[AGENTS.md](../AGENTS.md)** â€” quick start  
+- **[README.md](README.md)** -- overview + design principles  
+- **[USAGE.md section 21](../USAGE.md)** -- full usage examples  
+- **[OPERATIONS.md section 14](../OPERATIONS.md)** -- CLI catalog  
+- **[WORKFLOW.md Phase M](../WORKFLOW.md)** -- ordered hunt phase  
+- **[AGENTS.md](../AGENTS.md)** -- quick start  

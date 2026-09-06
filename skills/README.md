@@ -1,12 +1,12 @@
-﻿# reconkit skill suite
+# reconkit skill suite
 
 Agent Skills ([agentskills.io](https://agentskills.io) format) for **maximum
 efficiency** on local **and cloud** LLMs: less noise, fewer false positives,
-structured PoC promotion â€” without shipping weaponized exploit packs.
+structured PoC promotion -- without shipping weaponized exploit packs.
 
 Works with every provider supported by `agents/llm.py` (Ollama, Grok, Claude,
-Gemini/Gemma, OpenAI, OpenRouter, Groq, …). Skills are text injected into system
-prompts â€” they do not call the network themselves.
+Gemini/Gemma, OpenAI, OpenRouter, Groq, ...). Skills are text injected into system
+prompts -- they do not call the network themselves.
 
 ## Research inputs (local clones)
 
@@ -24,8 +24,8 @@ Clones are **gitignored research** only. Runtime skills are the packs below.
 | Skill | Job |
 |-------|-----|
 | `reconkit-bug-bounty` | Master rules + module pipeline |
-| `reconkit-efficiency` | Hardware/token budgets, â‰¤3 modules/step |
-| `reconkit-fp-eval` | C0–C4 tiers, instant kill FP list |
+| `reconkit-efficiency` | Hardware/token budgets, <=3 modules/step |
+| `reconkit-fp-eval` | C0-C4 tiers, instant kill FP list |
 | `reconkit-exploit-prove` | Canary PoCs + map to `/prove` techniques |
 | `reconkit-triage-gate` | Pre-report gates (save N/A ratio) |
 | `reconkit-vuln-*` | On-demand: idor, jwt, graphql, ssrf, xss, sqli, takeover, secrets |
@@ -34,16 +34,16 @@ See **[SKILLS_INDEX.md](SKILLS_INDEX.md)** for the shared confidence model and
 full trigger tables.
 
 Surface mini-skills load only when the current modules/context match (e.g. `xss`
-module → `reconkit-vuln-xss`), capped at **3 per turn** for efficiency.
+module -> `reconkit-vuln-xss`), capped at **3 per turn** for efficiency.
 
 ## How agents load skills
 
 ```text
-planner     → bug-bounty + efficiency + fp-eval
-specialist  → bug-bounty + fp-eval  (+ surface mini-skills)
-analyst     → bug-bounty + fp-eval + exploit-prove + triage-gate  (+ surface)
-critic      → fp-eval + triage-gate + exploit-prove
-prove path  → fp-eval + exploit-prove (methodology; runtime is still /prove)
+planner     -> bug-bounty + efficiency + fp-eval
+specialist  -> bug-bounty + fp-eval  (+ surface mini-skills)
+analyst     -> bug-bounty + fp-eval + exploit-prove + triage-gate  (+ surface)
+critic      -> fp-eval + triage-gate + exploit-prove
+prove path  -> fp-eval + exploit-prove (methodology; runtime is still /prove)
 ```
 
 `agents/skills.py` injects by role with a char budget (`RECON_AGENT_SKILL_MAX`).
@@ -57,10 +57,10 @@ Zero-token pre-eval: `agents/eval.py` runs heuristics before analyst LLM.
 ```bash
 cd path/to/Reconkit
 python recon_agents.py agents
-# → primary skill path
-# → suite by role (planner / specialist / analyst / critic / prove)
-# → surface: (on-demand) reconkit-vuln-...
-# → index: skills/SKILLS_INDEX.md
+# -> primary skill path
+# -> suite by role (planner / specialist / analyst / critic / prove)
+# -> surface: (on-demand) reconkit-vuln-...
+# -> index: skills/SKILLS_INDEX.md
 ```
 
 ### Default hunt (skills on)
@@ -81,10 +81,10 @@ python recon_agents.py run --target example.com --max-steps 8
 ### Surface mini-skill focus
 
 ```bash
-# XSS module → unlocks reconkit-vuln-xss (count toward max 3 surface skills)
+# XSS module -> unlocks reconkit-vuln-xss (count toward max 3 surface skills)
 python recon_agents.py run --target example.com --modules xss --max-steps 4
 
-# JS → secrets + jwt candidates
+# JS -> secrets + jwt candidates
 python recon_agents.py run --target example.com --modules crawl,js --max-steps 4
 
 # After tools write files:
@@ -119,34 +119,34 @@ export XAI_API_KEY=xai-...
 python recon_agents.py config set --provider xai --model grok-2-latest
 python recon_agents.py check-llm
 python recon_agents.py run --target example.com --max-steps 8
-# C0–C4 rules still apply â€” skills are provider-agnostic
+# C0-C4 rules still apply -- skills are provider-agnostic
 ```
 
 ### End-to-end confidence ladder
 
 ```text
 1. /agent example.com --modules nuclei,xss
-   → planner/specialist use fp-eval; surface may load vuln-xss / takeover
+   -> planner/specialist use fp-eval; surface may load vuln-xss / takeover
 2. /findings reindex
-   → C1 candidates scored in index
+   -> C1 candidates scored in index
 3. /prove run example.com
-   → C2 if canary confirms
+   -> C2 if canary confirms
 4. Write PoC from exploit-prove template (human)
-   → still C2 until impact shown
+   -> still C2 until impact shown
 5. Demonstrate impact under RoE (human HITL)
-   → C3
+   -> C3
 6. /critic example.com  (triage-gate + fp-eval)
-   → C4-ready report language
+   -> C4-ready report language
 7. /report example.com + dashboard Proofs tab
 ```
 
 ## Design principles
 
-1. **Kill FPs before tools** â€” evaluation costs tokens once; bad modules cost minutes.  
-2. **Prove before â€œexploit writeâ€** â€” C2 automated canaries, then human C3 impact.  
-3. **No payload zoos in-repo** â€” methodology > 10k XSS strings for local agents.  
-4. **reconkit-native** â€” modules, prove, findings index, graph handoffs only.  
-5. **Provider-agnostic** â€” same skills for Ollama and cloud.  
+1. **Kill FPs before tools** -- evaluation costs tokens once; bad modules cost minutes.  
+2. **Prove before "exploit write"** -- C2 automated canaries, then human C3 impact.  
+3. **No payload zoos in-repo** -- methodology > 10k XSS strings for local agents.  
+4. **reconkit-native** -- modules, prove, findings index, graph handoffs only.  
+5. **Provider-agnostic** -- same skills for Ollama and cloud.  
 
 ## Layout
 
@@ -171,5 +171,5 @@ skills/
   reconkit-vuln-secrets/SKILL.md
 ```
 
-Loader: `agents/skills.py` · pre-eval: `agents/eval.py`  
-User docs: **USAGE.md §21** · **OPERATIONS.md §14** · **WORKFLOW.md Phase M** · **[HUNTER.md](../HUNTER.md)**.
+Loader: `agents/skills.py`  /  pre-eval: `agents/eval.py`  
+User docs: **USAGE.md section 21**  /  **OPERATIONS.md section 14**  /  **WORKFLOW.md Phase M**  /  **[HUNTER.md](../HUNTER.md)**.

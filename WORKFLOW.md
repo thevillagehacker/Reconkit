@@ -1,6 +1,6 @@
-﻿# reconkit v3.0.0 â€” Complete workflow & examples
+# reconkit v3.0.0 -- Complete workflow & examples
 
-Ordered hunt: **setup → authorize → recon → program weights → index → prove → graph → dashboard → agents (local/cloud + skills) → report**.
+Ordered hunt: **setup -> authorize -> recon -> program weights -> index -> prove -> graph -> dashboard -> agents (local/cloud + skills) -> report**.
 
 Replace `example.com` with a domain you are **explicitly authorized** to test.
 
@@ -10,7 +10,7 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 | **[OPERATIONS.md](OPERATIONS.md)** | Exhaustive catalog of **every** command/API |
 | **[USAGE.md](USAGE.md)** | Architecture, modules, configs, troubleshooting |
 | **[AGENTS.md](AGENTS.md)** | LLM / skills / prove / program pointer |
-| **[skills/README.md](skills/README.md)** | Agent skill suite + C0–C4 |
+| **[skills/README.md](skills/README.md)** | Agent skill suite + C0-C4 |
 | **[ROADMAP.md](ROADMAP.md)** | What is done vs future |
 
 > **Project root:** `the Reconkit project root` (not v2.1.0 / v2.0.1).
@@ -21,21 +21,21 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 
 1. [How to drive the toolkit](#1-how-to-drive-the-toolkit)
 2. [Enter the project](#2-enter-the-project)
-3. [Phase A â€” Setup](#3-phase-a--setup)
-4. [Phase B â€” Verify](#4-phase-b--verify)
-5. [Phase C â€” Wordlists & API keys](#5-phase-c--wordlists--api-keys)
-6. [Phase D â€” Scope](#6-phase-d--scope)
-7. [Phase E â€” Discover modules & help](#7-phase-e--discover-modules--help)
-8. [Phase F â€” Verbosity & rate](#8-phase-f--verbosity--rate)
-9. [Phase G â€” Run recon](#9-phase-g--run-recon)
-10. [Phase H â€” Program profile & findings index](#10-phase-h--program-profile--findings-index)
-11. [Phase I â€” Notable, diff, doctor, tips](#11-phase-i--notable-diff-doctor-tips)
-12. [Phase J â€” Prove (safe validation)](#12-phase-j--prove-safe-validation)
-13. [Phase K â€” Attack graph](#13-phase-k--attack-graph)
-14. [Phase L — Dashboard (Scan / Findings / Inbox / Proofs / Graph / Insights)](#14-phase-l--dashboard)
-15. [Phase M â€” Multi-agent LLM (local + cloud + skills)](#15-phase-m--multi-agent-llm-local--cloud--skills)
-16. [Phase N â€” Report, critic, jobs](#16-phase-n--report-critic-jobs)
-17. [Phase O â€” Session utilities](#17-phase-o--session-utilities)
+3. [Phase A -- Setup](#3-phase-a--setup)
+4. [Phase B -- Verify](#4-phase-b--verify)
+5. [Phase C -- Wordlists & API keys](#5-phase-c--wordlists--api-keys)
+6. [Phase D -- Scope](#6-phase-d--scope)
+7. [Phase E -- Discover modules & help](#7-phase-e--discover-modules--help)
+8. [Phase F -- Verbosity & rate](#8-phase-f--verbosity--rate)
+9. [Phase G -- Run recon](#9-phase-g--run-recon)
+10. [Phase H -- Program profile & findings index](#10-phase-h--program-profile--findings-index)
+11. [Phase I -- Notable, diff, doctor, tips](#11-phase-i--notable-diff-doctor-tips)
+12. [Phase J -- Prove (safe validation)](#12-phase-j--prove-safe-validation)
+13. [Phase K -- Attack graph](#13-phase-k--attack-graph)
+14. [Phase L -- Dashboard (Scan / Findings / Inbox / Proofs / Graph / Insights)](#14-phase-l--dashboard)
+15. [Phase M -- Multi-agent LLM (local + cloud + skills)](#15-phase-m--multi-agent-llm-local--cloud--skills)
+16. [Phase N -- Report, critic, jobs](#16-phase-n--report-critic-jobs)
+17. [Phase O -- Session utilities](#17-phase-o--session-utilities)
 18. [Copy-paste full hunts](#18-copy-paste-full-hunts)
 19. [Safety checklist](#19-safety-checklist)
 20. [See also](#20-see-also)
@@ -47,7 +47,7 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 | Style | Launch |
 |-------|--------|
 | **A. Interactive shell** (recommended) | `python recon_shell.py` |
-| **B. CLI one-shots** | `python reconkit.py …` / `recon_prove.py` / `recon_agents.py` |
+| **B. CLI one-shots** | `python reconkit.py ...` / `recon_prove.py` / `recon_agents.py` |
 | **C. Dashboard** | `python recon_dashboard.py` |
 
 Every shell command supports:
@@ -72,12 +72,12 @@ cd C:\Users\<you>\GitHub\Bug_Bounty\the Reconkit project root
 
 pip install prompt_toolkit colorama
 python reconkit.py --version
-# → reconkit 3.0.0
+# -> reconkit 3.0.0
 ```
 
 ---
 
-## 3. Phase A â€” Setup
+## 3. Phase A -- Setup
 
 ### CLI
 
@@ -95,15 +95,15 @@ python reconkit.py setup
 ```text
 python recon_shell.py
 
-â–¸ /checkenv
-â–¸ /setup
-â–¸ /checkenv -h
-â–¸ /setup --help
+> /checkenv
+> /setup
+> /checkenv -h
+> /setup --help
 ```
 
 ---
 
-## 4. Phase B â€” Verify
+## 4. Phase B -- Verify
 
 ### CLI
 
@@ -115,14 +115,14 @@ python reconkit.py -v 2 verify
 ### Shell
 
 ```text
-â–¸ /verify
-â–¸ /verify -h
-â–¸ /status
+> /verify
+> /verify -h
+> /status
 ```
 
 ---
 
-## 5. Phase C â€” Wordlists & API keys
+## 5. Phase C -- Wordlists & API keys
 
 ### Wordlists
 
@@ -131,8 +131,8 @@ python reconkit.py wordlists
 ```
 
 ```text
-â–¸ /wordlists
-â–¸ /wl
+> /wordlists
+> /wl
 ```
 
 ### API keys (optional)
@@ -145,17 +145,17 @@ python reconkit.py keys remove PDCP_API_KEY
 ```
 
 ```text
-â–¸ /keys set PDCP_API_KEY <token>
-â–¸ /keys list
-â–¸ /keys remove PDCP_API_KEY
-â–¸ /keys -h
+> /keys set PDCP_API_KEY <token>
+> /keys list
+> /keys remove PDCP_API_KEY
+> /keys -h
 ```
 
 Keys live in `~/.reconkit/secrets.env` only.
 
 ---
 
-## 6. Phase D â€” Scope
+## 6. Phase D -- Scope
 
 **Required** before `run` / `prove run` / agents.
 
@@ -172,16 +172,16 @@ python reconkit.py scope check example.com
 ### Shell
 
 ```text
-â–¸ /scope add example.com
+> /scope add example.com
 # type yes
-â–¸ /scope list
-â–¸ /scope check example.com
-â–¸ /scope -h
+> /scope list
+> /scope check example.com
+> /scope -h
 ```
 
 ---
 
-## 7. Phase E â€” Discover modules & help
+## 7. Phase E -- Discover modules & help
 
 ### List modules
 
@@ -190,22 +190,22 @@ python reconkit.py modules
 ```
 
 ```text
-â–¸ /modules
-â–¸ /mods
+> /modules
+> /mods
 ```
 
 ### Help & menus
 
 ```text
-â–¸ /help
-â–¸ /help run
-â–¸ /commands
-â–¸ /                 # numbered menu (Enter after /)
-â–¸ /co               # LIVE filter: /commands /config
-â–¸ /run -h
-â–¸ /prove -h
-â–¸ /program -h
-â–¸ /graph -h
+> /help
+> /help run
+> /commands
+> /                 # numbered menu (Enter after /)
+> /co               # LIVE filter: /commands /config
+> /run -h
+> /prove -h
+> /program -h
+> /graph -h
 ```
 
 CLI:
@@ -220,7 +220,7 @@ python recon_agents.py -h
 
 ---
 
-## 8. Phase F â€” Verbosity & rate
+## 8. Phase F -- Verbosity & rate
 
 | Level | Name | Output |
 |------:|------|--------|
@@ -242,26 +242,26 @@ python reconkit.py --debug run --target example.com --modules dns
 ### Shell
 
 ```text
-â–¸ /verbose 0
-â–¸ /verbose 1
-â–¸ /verbose 2
-â–¸ /verbose 3
-â–¸ /verbose live
-â–¸ /rate show
-â–¸ /rate stealth
-â–¸ /rate normal
-â–¸ /rate aggressive
+> /verbose 0
+> /verbose 1
+> /verbose 2
+> /verbose 3
+> /verbose live
+> /rate show
+> /rate stealth
+> /rate normal
+> /rate aggressive
 ```
 
 ---
 
-## 9. Phase G â€” Run recon
+## 9. Phase G -- Run recon
 
 Set session target (shell):
 
 ```text
-â–¸ /target example.com
-â–¸ /t example.com
+> /target example.com
+> /t example.com
 ```
 
 ### G.1 Quick pass
@@ -271,9 +271,9 @@ python reconkit.py run --target example.com --modules subdomains,dns,httpprobe
 ```
 
 ```text
-â–¸ /quick example.com
-â–¸ /playbook run quick example.com
-â–¸ /run example.com --modules subdomains,dns,httpprobe
+> /quick example.com
+> /playbook run quick example.com
+> /run example.com --modules subdomains,dns,httpprobe
 ```
 
 ### G.2 Selected modules
@@ -284,10 +284,10 @@ python reconkit.py run --target example.com \
 ```
 
 ```text
-â–¸ /run example.com --modules crawl,js,params,xss,sqli,ssrf_ssti,nuclei,cloud
-â–¸ /playbook run prove-prep example.com
-â–¸ /playbook run vuln-pass example.com
-â–¸ /playbook run js-deep example.com
+> /run example.com --modules crawl,js,params,xss,sqli,ssrf_ssti,nuclei,cloud
+> /playbook run prove-prep example.com
+> /playbook run vuln-pass example.com
+> /playbook run js-deep example.com
 ```
 
 ### G.3 Full pipeline
@@ -298,24 +298,24 @@ python reconkit.py run --target example.com
 ```
 
 ```text
-â–¸ /full example.com
-â–¸ /run example.com --modules all
-â–¸ /playbook run full example.com
+> /full example.com
+> /run example.com --modules all
+> /playbook run full example.com
 ```
 
 ### G.4 Interactive picker
 
 ```text
-â–¸ /scan
-â–¸ /scan example.com
+> /scan
+> /scan example.com
 ```
 
 ### G.5 Background job
 
 ```text
-â–¸ /run example.com --modules subdomains,dns,httpprobe --bg
-â–¸ /jobs
-â–¸ /jobs status <id>
+> /run example.com --modules subdomains,dns,httpprobe --bg
+> /jobs
+> /jobs status <id>
 ```
 
 ### G.6 Resume, multi-scope, authenticated recon
@@ -337,26 +337,26 @@ and prove requests. Full hunter extras: **[HUNTER.md](HUNTER.md)**.
 
 ```text
 ~/.reconkit/output/example.com/
-  subdomains.txt, alive.txt, urls.txt, …
+  subdomains.txt, alive.txt, urls.txt, ...
   proofs/          # after prove
 ```
 
 ```text
-â–¸ /outdir example.com
-â–¸ /output
+> /outdir example.com
+> /output
 ```
 
 ---
 
-## 10. Phase H â€” Program profile & findings index
+## 10. Phase H -- Program profile & findings index
 
 ### H.1 Choose program weights
 
 ```text
-â–¸ /program list
-â–¸ /program show
-â–¸ /program set example-web
-â–¸ /program set default
+> /program list
+> /program show
+> /program set example-web
+> /program set default
 ```
 
 ```bash
@@ -374,40 +374,40 @@ python reconkit.py findings summary example.com
 ```
 
 ```text
-â–¸ /findings reindex
-â–¸ /findings
-â–¸ /findings summary example.com
-â–¸ /reindex
+> /findings reindex
+> /findings
+> /findings summary example.com
+> /reindex
 ```
 
 **Always reindex after** recon waves and after `/program set`.
 
 ---
 
-## 11. Phase I â€” Notable, diff, doctor, tips
+## 11. Phase I -- Notable, diff, doctor, tips
 
 ```text
-â–¸ /notable
-â–¸ /notable example.com
-â–¸ /notable example.com --limit 30
-â–¸ /top
+> /notable
+> /notable example.com
+> /notable example.com --limit 30
+> /top
 
-â–¸ /diff example.com
+> /diff example.com
 # needs two reindexes for that target
 
-â–¸ /doctor
-â–¸ /doctor example.com
+> /doctor
+> /doctor example.com
 
-â–¸ /tips subdomain takeover
-â–¸ /tips jwt in javascript
+> /tips subdomain takeover
+> /tips jwt in javascript
 ```
 
 ---
 
-## 12. Phase J â€” Prove (safe validation)
+## 12. Phase J -- Prove (safe validation)
 
 Policy: `config/exploit_policy.json`  
-Safe by default â€” markers/canaries only.
+Safe by default -- markers/canaries only.
 
 ### J.1 Policy & techniques
 
@@ -418,12 +418,12 @@ python reconkit.py prove policy
 ```
 
 ```text
-â–¸ /prove policy
-â–¸ /prove techniques
-â–¸ /prove -h
+> /prove policy
+> /prove techniques
+> /prove -h
 ```
 
-Techniques: `xss_reflect` Â· `ssti_math` Â· `nuclei_recheck` Â· `takeover_fingerprint` Â· `ssrf_canary_review` Â· `sqli_boolean` (off until policy allows).
+Techniques: `xss_reflect`  /  `ssti_math`  /  `nuclei_recheck`  /  `takeover_fingerprint`  /  `ssrf_canary_review`  /  `sqli_boolean` (off until policy allows).
 
 ### J.2 Optional OAST / SQLi (policy file)
 
@@ -451,40 +451,40 @@ python recon_prove.py show --target example.com --id <proof_id>
 ```
 
 ```text
-â–¸ /prove queue
-â–¸ /prove queue example.com
-â–¸ /prove queue example.com --all
-â–¸ /prove run example.com --dry-run
-â–¸ /prove run example.com
-â–¸ /prove run example.com --technique ssti_math
-â–¸ /prove list example.com
-â–¸ /target example.com
-â–¸ /prove show <id>
+> /prove queue
+> /prove queue example.com
+> /prove queue example.com --all
+> /prove run example.com --dry-run
+> /prove run example.com
+> /prove run example.com --technique ssti_math
+> /prove list example.com
+> /target example.com
+> /prove show <id>
 ```
 
 ### J.4 Prep playbook then prove
 
 ```text
-â–¸ /playbook run prove-prep example.com
-â–¸ /findings reindex
-â–¸ /prove queue
-â–¸ /prove run example.com
+> /playbook run prove-prep example.com
+> /findings reindex
+> /prove queue
+> /prove run example.com
 ```
 
 Proofs: `~/.reconkit/output/example.com/proofs/`.
 
 ---
 
-## 13. Phase K â€” Attack graph
+## 13. Phase K -- Attack graph
 
 ### Shell
 
 ```text
-â–¸ /graph
-â–¸ /graph summary
-â–¸ /graph show
-â–¸ /graph show example.com
-â–¸ /graph summary example.com --min-score 40
+> /graph
+> /graph summary
+> /graph show
+> /graph show example.com
+> /graph summary example.com --min-score 40
 ```
 
 ### Python / API
@@ -495,12 +495,12 @@ python -c "from graph import build_graph, graph_summary; print(graph_summary(bui
 curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40" | head
 ```
 
-Nodes: target Â· host Â· url Â· vuln Â· secret Â· proof Â· module  
-Edges: has_asset Â· exposes Â· proved_by Â· from_module Â· …
+Nodes: target  /  host  /  url  /  vuln  /  secret  /  proof  /  module  
+Edges: has_asset  /  exposes  /  proved_by  /  from_module  /  ...
 
 ---
 
-## 14. Phase L â€” Dashboard
+## 14. Phase L -- Dashboard
 
 ### Launch
 
@@ -511,9 +511,9 @@ python reconkit.py dashboard --no-browser
 ```
 
 ```text
-â–¸ /dashboard
-â–¸ /dashboard --port 9000 --no-browser
-â–¸ /dash
+> /dashboard
+> /dashboard --port 9000 --no-browser
+> /dash
 ```
 
 Browse: http://127.0.0.1:8787/ (or `http://<VM_IP>:8787/` from host).  
@@ -525,31 +525,31 @@ Browse: http://127.0.0.1:8787/ (or `http://<VM_IP>:8787/` from host).
 |---------|----------------|
 | **UI chrome / tables / labels** | `Helvetica Neue`, **Inter**, system UI sans |
 | **Evidence / file preview / mono** | **JetBrains Mono** (Google Fonts) |
-| **Console boxes** | Background `#1a1d24`, text `#a8b0bd` (muted solid â€” not neon green) |
+| **Console boxes** | Background `#1a1d24`, text `#a8b0bd` (muted solid -- not neon green) |
 
-Open a recon row → **source preview** and Proofs **evidence** panels use the mono console theme.
+Open a recon row -> **source preview** and Proofs **evidence** panels use the mono console theme.
 
 ### Tabs
 
-**Scan** · **Findings** · **Inbox** (C1+ hunter triage) · **Proofs** · **Graph** · **Insights**
+**Scan**  /  **Findings**  /  **Inbox** (C1+ hunter triage)  /  **Proofs**  /  **Graph**  /  **Insights**
 
 ### Tabs (detail)
 
 | Tab | Use | Example walkthrough |
 |-----|-----|---------------------|
 | **Scan** | Live module tiles | Watch current phase while `/run` is backgrounded |
-| **Findings** | Filter module/severity/type/notable; open evidence | Module=`nuclei`, Notable only → open high-score row |
+| **Findings** | Filter module/severity/type/notable; open evidence | Module=`nuclei`, Notable only -> open high-score row |
 | **Inbox** | C1+ hunter triage + suggested prove technique | Same as `/inbox` |
-| **Proofs** | Confirmed / needs_manual / … proofs | Status=`confirmed`, technique=`xss_reflect` |
+| **Proofs** | Confirmed / needs_manual / ... proofs | Status=`confirmed`, technique=`xss_reflect` |
 | **Graph** | Force-directed attack paths; drag nodes; click detail | Min score `40+`, Reload graph, click edge/node |
-| **Insights** | Bar charts: severity, modules, score buckets, proof status | Pick target → compare severity vs proof status |
+| **Insights** | Bar charts: severity, modules, score buckets, proof status | Pick target -> compare severity vs proof status |
 
 ### Controls
 
-- **Live** â€” poll disk ~4s (badge LIVE ON)  
-- **Reindex** â€” rebuild index without restart (after recon or `/prove run`)  
-- **program:** badge â€” active BB profile from `/program set`  
-- Target sidebar â€” scopes **all** tabs  
+- **Live** -- poll disk ~4s (badge LIVE ON)  
+- **Reindex** -- rebuild index without restart (after recon or `/prove run`)  
+- **program:** badge -- active BB profile from `/program set`  
+- Target sidebar -- scopes **all** tabs  
 
 ### Useful API
 
@@ -564,14 +564,14 @@ curl -s http://127.0.0.1:8787/api/program
 curl -s -X POST http://127.0.0.1:8787/api/reindex
 ```
 
-Full API table: **OPERATIONS.md Â§12**.
+Full API table: **OPERATIONS.md section 12**.
 
 ---
 
-## 15. Phase M â€” Multi-agent LLM (local + cloud + skills)
+## 15. Phase M -- Multi-agent LLM (local + cloud + skills)
 
 Agents use a unified client (`agents/llm.py`): **Ollama** locally **or** cloud
-providers (Grok, Claude, Gemini/Gemma, OpenAI, OpenRouter, Groq, …).  
+providers (Grok, Claude, Gemini/Gemma, OpenAI, OpenRouter, Groq, ...).  
 Skill packs inject by **role** and **surface** (vuln class) for fewer FPs.
 
 ### M.1 List providers
@@ -593,20 +593,20 @@ python recon_agents.py providers
 | `deepseek` / `together` / `mistral` / `fireworks` | OpenAI-compat | see `providers` | matching `*_API_KEY` |
 | `custom` | OpenAI-compat | you set | `RECON_LLM_API_KEY` |
 
-Templates: **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)** Â·  
-`config/agent_config.cloud-example.json` (drop-in) Â·  
-`config/agent_config.cloud-presets.json` Â·  
-`config/agent_config.cloud-examples.json` Â· `config/agent.env.example`.
+Templates: **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)**  /   
+`config/agent_config.cloud-example.json` (drop-in)  /   
+`config/agent_config.cloud-presets.json`  /   
+`config/agent_config.cloud-examples.json`  /  `config/agent.env.example`.
 
 ### M.2 Configure (always `--flag` form)
 
 ```bash
 python recon_agents.py config show
 python recon_agents.py config path
-# Local Ollama (VM → Windows: use HOST IP, not Kali IP)
+# Local Ollama (VM -> Windows: use HOST IP, not Kali IP)
 python recon_agents.py config set --provider ollama \
   --base-url http://192.168.1.4:11434 --model qwen3:8b
-# Cloud â€” set env key first, then switch provider (model preset fills in)
+# Cloud -- set env key first, then switch provider (model preset fills in)
 python recon_agents.py config set --provider xai --model grok-2-latest
 python recon_agents.py config set --provider anthropic --model claude-sonnet-4-20250514
 python recon_agents.py config set --provider google --model gemini-2.0-flash
@@ -614,17 +614,17 @@ python recon_agents.py config set --provider openai --model gpt-4o-mini
 ```
 
 ```text
-â–¸ /config show
-â–¸ /config path
-â–¸ /config set --provider ollama --base-url http://192.168.1.4:11434 --model qwen3:8b
-â–¸ /config set --provider xai --model grok-2-latest
-â–¸ /config set --provider anthropic --model claude-sonnet-4-20250514
-â–¸ /config set --model qwen3:8b --timeout 300
+> /config show
+> /config path
+> /config set --provider ollama --base-url http://192.168.1.4:11434 --model qwen3:8b
+> /config set --provider xai --model grok-2-latest
+> /config set --provider anthropic --model claude-sonnet-4-20250514
+> /config set --model qwen3:8b --timeout 300
 ```
 
-**Wrong (rejected):** `/config set base_url http://…` (bare keys).
+**Wrong (rejected):** `/config set base_url http://...` (bare keys).
 
-**VM → Windows Ollama:** `base_url` = host IP only.  
+**VM -> Windows Ollama:** `base_url` = host IP only.  
 Windows: `setx OLLAMA_HOST 0.0.0.0`, restart Ollama, firewall 11434.
 
 ### M.3 Ping
@@ -636,29 +636,29 @@ python recon_agents.py check-llm --provider anthropic
 ```
 
 ```text
-â–¸ /check-llm
-â–¸ /llm
-â–¸ /ping-llm
+> /check-llm
+> /llm
+> /ping-llm
 ```
 
-Expect: `OK â€” model replied: pong`. Cloud needs the API key in the environment.
+Expect: `OK -- model replied: pong`. Cloud needs the API key in the environment.
 
 ### M.4 Inspect agents + skill suite
 
 ```bash
 python recon_agents.py agents
-# → specialists + primary skill path + suite by role + surface mini-skills
+# -> specialists + primary skill path + suite by role + surface mini-skills
 python recon_agents.py modules
 ```
 
 ```text
-â–¸ /agents
-â–¸ /agent-list
+> /agents
+> /agent-list
 ```
 
 ### M.5 Agent skill suite (automatic)
 
-Skills are Agent Skills–style packs under `skills/` injected into system prompts.
+Skills are Agent Skills-style packs under `skills/` injected into system prompts.
 They work with **any** provider (Ollama or cloud).
 
 | Role | Core skills loaded |
@@ -678,15 +678,15 @@ They work with **any** provider (Ollama or cloud).
 | `reconkit-vuln-jwt` / `secrets` | module `js` |
 | `reconkit-vuln-idor` | module `params` / crawl |
 | `reconkit-vuln-takeover` | module `dns` / nuclei |
-| `reconkit-vuln-graphql` | crawl + â€œgraphqlâ€ text |
+| `reconkit-vuln-graphql` | crawl + "graphql" text |
 
-**Confidence pipeline (C0–C4)**
+**Confidence pipeline (C0-C4)**
 
 ```text
-C0 noise → drop
-C1 scanner hit → /prove or manual
-C2 canary confirmed (prove) → PoC draft
-C3 impact (human HITL) → triage-gate
+C0 noise -> drop
+C1 scanner hit -> /prove or manual
+C2 canary confirmed (prove) -> PoC draft
+C3 impact (human HITL) -> triage-gate
 C4 report-ready
 ```
 
@@ -703,7 +703,7 @@ export RECON_AGENT_SKILL_EXTRA=reconkit-efficiency
 export RECON_AGENT_SKILL_MAX=14000
 ```
 
-Details: **skills/README.md** Â· **skills/SKILLS_INDEX.md** Â· **OPERATIONS.md Â§14**.
+Details: **skills/README.md**  /  **skills/SKILLS_INDEX.md**  /  **OPERATIONS.md section 14**.
 
 ### M.6 Run agents
 
@@ -721,12 +721,12 @@ python recon_agents.py run --target example.com --provider ollama \
 ```
 
 ```text
-â–¸ /agents
-â–¸ /agent example.com --dry-run
-â–¸ /agent example.com
-â–¸ /agent example.com --modules subdomains,dns,httpprobe --max-steps 6
-â–¸ /agent example.com --approve
-â–¸ /agent -h
+> /agents
+> /agent example.com --dry-run
+> /agent example.com
+> /agent example.com --modules subdomains,dns,httpprobe --max-steps 6
+> /agent example.com --approve
+> /agent -h
 ```
 
 Artifacts: `~/.reconkit/output/example.com/agent_state.json`, `agent_report.md`.
@@ -734,10 +734,10 @@ Artifacts: `~/.reconkit/output/example.com/agent_state.json`, `agent_report.md`.
 Then:
 
 ```text
-â–¸ /findings reindex
-â–¸ /prove queue
-â–¸ /prove run example.com
-â–¸ /outdir example.com
+> /findings reindex
+> /prove queue
+> /prove run example.com
+> /outdir example.com
 ```
 
 ### M.7 Cloud end-to-end examples
@@ -776,7 +776,7 @@ python recon_agents.py config set --provider gemma --model gemma-3-27b-it
 python recon_agents.py check-llm
 ```
 
-**OpenRouter (one key → many models)**
+**OpenRouter (one key -> many models)**
 
 ```bash
 export OPENROUTER_API_KEY=...
@@ -787,26 +787,26 @@ python recon_agents.py check-llm
 
 ---
 
-## 16. Phase N â€” Report, critic, jobs
+## 16. Phase N -- Report, critic, jobs
 
 ```text
-â–¸ /report example.com
-â–¸ /report example.com --all
-# → report_draft.md (includes proofs when present)
+> /report example.com
+> /report example.com --all
+# -> report_draft.md (includes proofs when present)
 
-â–¸ /critic example.com
+> /critic example.com
 # needs LLM + agent_report.md or report_draft.md
 # critic loads fp-eval + triage-gate + exploit-prove skills
-# → critic_review.md
+# -> critic_review.md
 
-â–¸ /run example.com --modules nuclei --bg
-â–¸ /jobs
-â–¸ /jobs status <id>
+> /run example.com --modules nuclei --bg
+> /jobs
+> /jobs status <id>
 ```
 
 ---
 
-## 17. Phase O — Session utilities
+## 17. Phase O -- Session utilities
 
 ```text
 /status
@@ -814,7 +814,7 @@ python recon_agents.py check-llm
 /clear
 /target
 /session show
-/session set --cookie "sid=…"
+/session set --cookie "sid=..."
 /inbox
 /evidence example.com
 /wordlist-target example.com
@@ -865,7 +865,7 @@ python recon_shell.py
 /graph show example.com
 /report example.com
 /dashboard
-# browser: Recon → Proofs → Graph → Insights
+# browser: Recon -> Proofs -> Graph -> Insights
 # fonts: UI Helvetica Neue/Inter; evidence JetBrains Mono #1a1d24
 /exit
 ```
@@ -901,19 +901,19 @@ export XAI_API_KEY=xai-...
 python recon_agents.py config set --provider xai --model grok-2-latest
 python recon_agents.py check-llm
 python recon_agents.py run --target example.com --max-steps 8
-# skills still inject (C0–C4 + surface mini-skills)
+# skills still inject (C0-C4 + surface mini-skills)
 ```
 
 ### 18.5 Surface mini-skill focused pass
 
 ```text
-# XSS surface → injects reconkit-vuln-xss (among others, max 3)
+# XSS surface -> injects reconkit-vuln-xss (among others, max 3)
 /agent example.com --modules xss --max-steps 4
 
 # JS secrets / JWT surface
 /agent example.com --modules crawl,js --max-steps 4
 
-# Then prove canaries → C2
+# Then prove canaries -> C2
 /findings reindex
 /prove run example.com --technique xss_reflect
 ```
@@ -945,7 +945,7 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 - [ ] Secrets only in `~/.reconkit/secrets.env`
 - [ ] Treat `~/.reconkit/output` as sensitive
 - [ ] `allow_sqli_boolean` / OAST only under program RoE
-- [ ] Never claim C3/C4 from nuclei alone â€” prove + impact first
+- [ ] Never claim C3/C4 from nuclei alone -- prove + impact first
 
 ---
 
@@ -956,7 +956,7 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 | Every command + API example | **[OPERATIONS.md](OPERATIONS.md)** |
 | Config files, modules detail, troubleshooting | **[USAGE.md](USAGE.md)** |
 | LLM / program / prove / skills quick start | **[AGENTS.md](AGENTS.md)** |
-| Skill suite design + C0–C4 | **[skills/README.md](skills/README.md)** Â· **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** |
+| Skill suite design + C0-C4 | **[skills/README.md](skills/README.md)**  /  **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** |
 | Hunter extras (session, HAR, inbox, extra modules) | **[HUNTER.md](HUNTER.md)** |
 | Implemented vs future | **[ROADMAP.md](ROADMAP.md)** |
 

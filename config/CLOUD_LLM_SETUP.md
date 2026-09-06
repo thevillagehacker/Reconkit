@@ -6,7 +6,7 @@ Your active config lives at:
 config/agent_config.json
 ```
 
-By default it points at **local Ollama**. To use **cloud** models (Grok, Claude, OpenAI, Gemini, …), set a provider + API key.
+By default it points at **local Ollama**. To use **cloud** models (Grok, Claude, OpenAI, Gemini, ...), set a provider + API key.
 
 Related files:
 
@@ -58,7 +58,7 @@ python recon_agents.py config show
 python recon_agents.py check-llm
 ```
 
-Expect: `OK — model replied: pong` (or similar).
+Expect: `OK -- model replied: pong` (or similar).
 
 ### 4. Run agents
 
@@ -80,7 +80,7 @@ From the interactive shell:
 
 ---
 
-## Option B — Copy the example config file
+## Option B -- Copy the example config file
 
 ```powershell
 cd C:\Users\navee\GitHub\Bug_Bounty\scripts\v2.2.0
@@ -92,7 +92,7 @@ $env:XAI_API_KEY = "xai-..."
 python recon_agents.py check-llm
 ```
 
-The example file looks like this (keys stay empty — use env):
+The example file looks like this (keys stay empty -- use env):
 
 ```json
 {
@@ -162,7 +162,7 @@ python recon_agents.py config set --provider ollama --base-url http://127.0.0.1:
 python recon_agents.py check-llm
 ```
 
-VM → Windows host Ollama: use the **Windows host IP**, e.g. `http://192.168.1.4:11434`.
+VM -> Windows host Ollama: use the **Windows host IP**, e.g. `http://192.168.1.4:11434`.
 
 ---
 
@@ -184,11 +184,11 @@ So:
 
 | Symptom | Fix |
 |---------|-----|
-| `api_key: (empty)` and HTTP 401 | Key not in env for this shell — set `$env:...` again |
-| Still hitting port `11434` | Provider still `ollama` — run `config set --provider xai` |
+| `api_key: (empty)` and HTTP 401 | Key not in env for this shell -- set `$env:...` again |
+| Still hitting port `11434` | Provider still `ollama` -- run `config set --provider xai` |
 | `check-llm` timeout | Raise timeout: `config set --timeout 180` |
 | Wrong model name | `python recon_agents.py providers` for defaults |
-| Works in CLI, not shell | Shell was started before `setx` — restart shell |
+| Works in CLI, not shell | Shell was started before `setx` -- restart shell |
 
 ```powershell
 python recon_agents.py config show

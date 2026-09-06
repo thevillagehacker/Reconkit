@@ -1,12 +1,12 @@
 # reconkit hunter extras
 
 Authorized bug-bounty / VDP recon extras used by a hunter or OSE. Detection
-and safe prove only — no sqlmap, shells, dumps, credential spray, or
+and safe prove only -- no sqlmap, shells, dumps, credential spray, or
 internet-wide mass scan.
 
-**Related:** [USAGE.md](USAGE.md) · [OPERATIONS.md](OPERATIONS.md) · [WORKFLOW.md](WORKFLOW.md)
+**Related:** [USAGE.md](USAGE.md)  /  [OPERATIONS.md](OPERATIONS.md)  /  [WORKFLOW.md](WORKFLOW.md)
 
-Tiers below match how the extras were added: **use Tier 1 first**, then 2–4.
+Tiers below match how the extras were added: **use Tier 1 first**, then 2-4.
 
 ---
 
@@ -21,11 +21,11 @@ Tiers below match how the extras were added: **use Tier 1 first**, then 2–4.
 
 ---
 
-## Tier 1 — authenticated surface & high-signal extras
+## Tier 1 -- authenticated surface & high-signal extras
 
 | Feature | How |
 |---------|-----|
-| Auth session (cookie A + headers) | `/session set --cookie "…" --header "Authorization: Bearer …"` |
+| Auth session (cookie A + headers) | `/session set --cookie "..." --header "Authorization: Bearer ..."` |
 | Multi-scope run | `/run --scope-all --modules subdomains,dns,httpprobe` |
 | JS intel (maps, routes, lib versions) | module `jsintel` |
 | API / OpenAPI / IDOR-shaped URLs | module `apis` |
@@ -40,14 +40,14 @@ Tiers below match how the extras were added: **use Tier 1 first**, then 2–4.
 ```
 
 ```bash
-python reconkit.py session set --cookie "sid=abc" --header "Authorization: Bearer …"
+python reconkit.py session set --cookie "sid=abc" --header "Authorization: Bearer ..."
 python reconkit.py run --target example.com --modules jsintel,apis,bypass403,takeover_plus
 python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 ```
 
 ---
 
-## Tier 2 — more surface, still in-scope
+## Tier 2 -- more surface, still in-scope
 
 | Feature | How |
 |---------|-----|
@@ -57,7 +57,7 @@ python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 | Well-known / robots / security.txt | module `wellknown` |
 | Scoped Shodan/Censys | module `osint` (hostname query only) |
 | GitHub/GitLab URLs + optional trufflehog | module `gitrecon` (one public repo) |
-| WAF backoff | httpprobe writes `waf_detected.txt`; Cloudflare → `/rate stealth` |
+| WAF backoff | httpprobe writes `waf_detected.txt`; Cloudflare -> `/rate stealth` |
 
 ```text
 /playbook run hunter example.com
@@ -67,7 +67,7 @@ python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 
 ---
 
-## Tier 3 — safe prove extras (C1 → C2)
+## Tier 3 -- safe prove extras (C1 -> C2)
 
 Set `oast_base_url` in `config/exploit_policy.json` for redirect/SSRF canaries.
 
@@ -82,7 +82,7 @@ Set `oast_base_url` in `config/exploit_policy.json` for redirect/SSRF canaries.
 Matching recon modules: `redirect`, `cors`, `graphql` (detection), then `/prove`.
 
 ```text
-/session set --cookie "userA=…" --cookie-b "userB=…"
+/session set --cookie "userA=..." --cookie-b "userB=..."
 /findings reindex
 /prove queue example.com
 /prove run example.com --technique cors_origin
@@ -97,14 +97,14 @@ python recon_prove.py run --target example.com --technique redirect_canary
 
 ---
 
-## Tier 4 — hunt ops (HAR, resume, evidence, inbox)
+## Tier 4 -- hunt ops (HAR, resume, evidence, inbox)
 
 | Feature | How |
 |---------|-----|
-| HAR import | `/har import capture.har example.com` — in-scope URLs → `urls.txt`; Cookie → session |
-| Target wordlist | `/wordlist-target example.com` → `wordlist_target.txt` |
+| HAR import | `/har import capture.har example.com` -- in-scope URLs -> `urls.txt`; Cookie -> session |
+| Target wordlist | `/wordlist-target example.com` -> `wordlist_target.txt` |
 | Resume a partial run | `/run example.com --resume` (skip stages whose output exists; `--force` to redo) |
-| Evidence ZIP | `/evidence example.com` → `evidence_<target>_….zip` |
+| Evidence ZIP | `/evidence example.com` -> `evidence_<target>_....zip` |
 | Notify | if `notify` CLI is installed, a C1+ vuln count is sent at end of a successful run |
 | Hunter inbox | `/inbox` or dashboard **INBOX** tab (`GET /api/inbox`) |
 
@@ -114,7 +114,7 @@ python recon_prove.py run --target example.com --technique redirect_canary
 /findings reindex
 /inbox example.com
 /evidence example.com
-/dashboard          # SCAN · FINDINGS · INBOX · PROOFS · GRAPH · INSIGHTS
+/dashboard          # SCAN  /  FINDINGS  /  INBOX  /  PROOFS  /  GRAPH  /  INSIGHTS
 ```
 
 ```bash
@@ -130,10 +130,10 @@ curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
 ## New modules (pipeline order)
 
 ```
-subdomains → permute → dns → ports → httpprobe → tls → wellknown
-         → crawl → js → jsintel → params → apis → content → bypass403 → gfextra
-         → xss → sqli → ssrf_ssti → redirect → cors → graphql
-         → nuclei → cloud → takeover_plus → osint → gitrecon → screenshots
+subdomains -> permute -> dns -> ports -> httpprobe -> tls -> wellknown
+         -> crawl -> js -> jsintel -> params -> apis -> content -> bypass403 -> gfextra
+         -> xss -> sqli -> ssrf_ssti -> redirect -> cors -> graphql
+         -> nuclei -> cloud -> takeover_plus -> osint -> gitrecon -> screenshots
 ```
 
 List descriptions anytime: `/modules` or `python reconkit.py modules`.
@@ -148,7 +148,7 @@ Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have input
 
 Under `~/.reconkit/output/<target>/`:
 
-Per-tool copies (written as soon as that tool finishes — you do not wait for the
+Per-tool copies (written as soon as that tool finishes -- you do not wait for the
 whole phase) live in `tools/<stage>/<tool>.txt`. The merged files below are
 updated after **each** tool, then finalized at stage end.
 

@@ -1,6 +1,6 @@
-﻿# reconkit roadmap (v3.0.0)
+# reconkit roadmap (v3.0.0)
 
-**Docs:** [USAGE.md](USAGE.md) Â· [WORKFLOW.md](WORKFLOW.md) Â· [OPERATIONS.md](OPERATIONS.md) Â· [AGENTS.md](AGENTS.md) Â· [skills/](skills/)
+**Docs:** [USAGE.md](USAGE.md)  /  [WORKFLOW.md](WORKFLOW.md)  /  [OPERATIONS.md](OPERATIONS.md)  /  [AGENTS.md](AGENTS.md)  /  [skills/](skills/)
 
 v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph**, **dashboard Graph/Insights**, **multi-provider LLMs**, **agent skill suite** (core + on-demand mini-skills).
 
@@ -8,22 +8,22 @@ v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph**, **d
 
 | Item | Status |
 |------|--------|
-| Program profiles (`config/programs/`, `/program`) | âœ… |
-| Weighted scoring by bounty category | âœ… |
-| Prove v2: XSS context classification | âœ… |
-| Prove v2: OAST SSRF (`oast_base_url`) | âœ… |
-| Prove v2: optional `sqli_boolean` (off by default) | âœ… |
-| Attack-path graph builder (`graph/`) | âœ… |
-| Dashboard **Graph** tab (force layout) | âœ… |
-| Dashboard **Insights** charts | âœ… |
-| API `/api/graph`, `/api/stats/charts`, `/api/program` | âœ… |
-| Dashboard typography (Helvetica Neue / Inter) + JetBrains Mono console | âœ… |
-| **Multi-provider LLM** (Ollama + xAI Grok, Anthropic Claude, Google Gemini/Gemma, OpenAI, OpenRouter, Groq, …) | âœ… |
-| `recon_agents.py providers` + cloud config templates | âœ… |
-| **Agent skill suite** (efficiency + FP eval + exploit-prove + triage) | âœ… |
-| **On-demand vuln mini-skills** (`reconkit-vuln-*`, max 3/turn) | âœ… |
-| Heuristic pre-eval `agents/eval.py` (C0–C4) | âœ… |
-| Exhaustive docs: OPERATIONS / WORKFLOW / USAGE / skills | âœ… |
+| Program profiles (`config/programs/`, `/program`) | [x] |
+| Weighted scoring by bounty category | [x] |
+| Prove v2: XSS context classification | [x] |
+| Prove v2: OAST SSRF (`oast_base_url`) | [x] |
+| Prove v2: optional `sqli_boolean` (off by default) | [x] |
+| Attack-path graph builder (`graph/`) | [x] |
+| Dashboard **Graph** tab (force layout) | [x] |
+| Dashboard **Insights** charts | [x] |
+| API `/api/graph`, `/api/stats/charts`, `/api/program` | [x] |
+| Dashboard typography (Helvetica Neue / Inter) + JetBrains Mono console | [x] |
+| **Multi-provider LLM** (Ollama + xAI Grok, Anthropic Claude, Google Gemini/Gemma, OpenAI, OpenRouter, Groq, ...) | [x] |
+| `recon_agents.py providers` + cloud config templates | [x] |
+| **Agent skill suite** (efficiency + FP eval + exploit-prove + triage) | [x] |
+| **On-demand vuln mini-skills** (`reconkit-vuln-*`, max 3/turn) | [x] |
+| Heuristic pre-eval `agents/eval.py` (C0-C4) | [x] |
+| Exhaustive docs: OPERATIONS / WORKFLOW / USAGE / skills | [x] |
 
 ## Done in hunter extras
 
@@ -31,15 +31,15 @@ See **[HUNTER.md](HUNTER.md)**.
 
 | Item | Status |
 |------|--------|
-| Auth session (`/session`, cookie A/B, httpx/prove headers) | ✅ |
-| Multi-scope `--scope-all` | ✅ |
-| JS intel / API harvest / 403 bypass / takeover+ | ✅ |
-| Ports (naabu) / permute / well-known / gf extras | ✅ |
-| Scoped OSINT + git/trufflehog | ✅ |
-| CORS / JWT / GraphQL / redirect / IDOR prove | ✅ |
-| HAR import, evidence ZIP, target wordlist, `--resume` | ✅ |
-| Hunter inbox (`/inbox` · dashboard **INBOX** · `/api/inbox`) | ✅ |
-| SQLite findings query path (`findings/db.py`) | ✅ |
+| Auth session (`/session`, cookie A/B, httpx/prove headers) | [x] |
+| Multi-scope `--scope-all` | [x] |
+| JS intel / API harvest / 403 bypass / takeover+ | [x] |
+| Ports (naabu) / permute / well-known / gf extras | [x] |
+| Scoped OSINT + git/trufflehog | [x] |
+| CORS / JWT / GraphQL / redirect / IDOR prove | [x] |
+| HAR import, evidence ZIP, target wordlist, `--resume` | [x] |
+| Hunter inbox (`/inbox`  /  dashboard **INBOX**  /  `/api/inbox`) | [x] |
+| SQLite findings query path (`findings/db.py`) | [x] |
 
 ## Still open (future)
 
@@ -50,4 +50,4 @@ See **[HUNTER.md](HUNTER.md)**.
 
 ---
 
-**Principle:** recon finds Â· programs prioritize Â· prove confirms safely Â· graph explains Â· skills kill FPs Â· cloud or local LLM.
+**Principle:** recon finds  /  programs prioritize  /  prove confirms safely  /  graph explains  /  skills kill FPs  /  cloud or local LLM.

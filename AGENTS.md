@@ -1,4 +1,4 @@
-﻿# Agents, prove, programs, graph & skills â€” v3.0.0
+# Agents, prove, programs, graph & skills -- v3.0.0
 
 **Dashboard** (v3.0.0): scan-phase tracker, findings, proofs, attack-path graph,
 and insights. CLI remains the engine; the UI is a local viewer and optional
@@ -9,10 +9,10 @@ scan control panel.
 | Doc | When |
 |-----|------|
 | **[OPERATIONS.md](OPERATIONS.md)** | Need **every** command / API with examples |
-| **[WORKFLOW.md](WORKFLOW.md)** | Need a full ordered hunt (phases A–O) |
+| **[WORKFLOW.md](WORKFLOW.md)** | Need a full ordered hunt (phases A-O) |
 | **[USAGE.md](USAGE.md)** | Architecture, configs, troubleshooting |
 | **[skills/README.md](skills/README.md)** | Skill suite design |
-| **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** | C0–C4 + mini-skill triggers |
+| **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** | C0-C4 + mini-skill triggers |
 | **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
 | **[ROADMAP.md](ROADMAP.md)** | What's done vs planned |
 
@@ -23,8 +23,8 @@ cd path/to/Reconkit
 pip install prompt_toolkit colorama
 
 python recon_shell.py
-# LIVE autocomplete: type /co → /commands /config
-# /run T --modules  → module list Â· /keys set  → key names
+# LIVE autocomplete: type /co -> /commands /config
+# /run T --modules  -> module list  /  /keys set  -> key names
 
 python reconkit.py --version
 python recon_dashboard.py
@@ -51,11 +51,11 @@ python recon_dashboard.py
 /prove policy|techniques|queue|run|list|show
 /graph summary|show
 /report /critic
-/config …  /check-llm  /agent …
+/config ...  /check-llm  /agent ...
 /dashboard
 ```
 
-Every command: `/cmd -h` Â· full catalog: **OPERATIONS.md**.  
+Every command: `/cmd -h`  /  full catalog: **OPERATIONS.md**.  
 Scan progress: one bar per tool finish (`progress_ui.py`); bg jobs use log mode.
 
 ## Program profiles
@@ -67,7 +67,7 @@ Scan progress: one bar per tool finish (`progress_ui.py`); bg jobs use log mode.
 /notable
 ```
 
-Files: `config/programs/*.json` Â· env: `RECON_PROGRAM=…`
+Files: `config/programs/*.json`  /  env: `RECON_PROGRAM=...`
 
 ## Prove (safe)
 
@@ -83,7 +83,7 @@ Files: `config/programs/*.json` Â· env: `RECON_PROGRAM=…`
 
 ```bash
 python recon_prove.py run --target example.com
-# Optional: config/exploit_policy.json → oast_base_url, allow_sqli_boolean
+# Optional: config/exploit_policy.json -> oast_base_url, allow_sqli_boolean
 ```
 
 Maps to confidence **C2** when confirmed (see skill suite below).
@@ -105,7 +105,7 @@ curl -s "http://127.0.0.1:8787/api/proofs?status=confirmed"
 
 ## LLM agents (local + cloud)
 
-Unified client: Ollama **or** cloud (Grok, Claude, Gemini/Gemma, OpenAI, OpenRouter, Groq, …).
+Unified client: Ollama **or** cloud (Grok, Claude, Gemini/Gemma, OpenAI, OpenRouter, Groq, ...).
 
 ```bash
 # List every provider + default model + key env name
@@ -152,7 +152,7 @@ python recon_agents.py run --target example.com --provider xai --model grok-2-la
 **Cloud setup (full walkthrough):** **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)**  
 Drop-in config: `config/agent_config.cloud-example.json`  
 All provider `llm` blocks: `config/agent_config.cloud-presets.json`  
-Snippets catalog: `config/agent_config.cloud-examples.json` Â· env: `config/agent.env.example`  
+Snippets catalog: `config/agent_config.cloud-examples.json`  /  env: `config/agent.env.example`  
 
 PowerShell cloud quickstart (Grok):
 
@@ -165,7 +165,7 @@ python recon_agents.py run --target example.com --max-steps 8
 
 Or: `copy config\agent_config.cloud-example.json config\agent_config.json` then set the key env.
 
-VM → Windows Ollama: host IP only (not Kali IP). Always use **`--flag`** form for `/config set`.
+VM -> Windows Ollama: host IP only (not Kali IP). Always use **`--flag`** form for `/config set`.
 
 ## Agent skill suite
 
@@ -177,8 +177,8 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 | Skill | Purpose |
 |-------|---------|
 | `reconkit-bug-bounty` | Master pipeline + scope rules |
-| `reconkit-efficiency` | Local/cloud token budgets (â‰¤3 modules/step) |
-| `reconkit-fp-eval` | C0–C4 tiers, kill-fast FPs |
+| `reconkit-efficiency` | Local/cloud token budgets (<=3 modules/step) |
+| `reconkit-fp-eval` | C0-C4 tiers, kill-fast FPs |
 | `reconkit-exploit-prove` | Canary PoCs + `/prove` technique map |
 | `reconkit-triage-gate` | Pre-report 7-gate / N/A prevention |
 
@@ -205,10 +205,10 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 ### Confidence path
 
 ```text
-C0 noise → drop
-C1 scanner → /prove or manual
-C2 canary confirmed → PoC draft
-C3 impact (human) → triage-gate
+C0 noise -> drop
+C1 scanner -> /prove or manual
+C2 canary confirmed -> PoC draft
+C3 impact (human) -> triage-gate
 C4 report-ready
 ```
 
@@ -223,16 +223,16 @@ python recon_agents.py agents    # shows suite by role + surface list
 ### Worked example
 
 ```bash
-# Surface XSS → mini-skill reconkit-vuln-xss injects for specialist/analyst
+# Surface XSS -> mini-skill reconkit-vuln-xss injects for specialist/analyst
 python recon_agents.py run --target example.com --modules xss --max-steps 4
 python reconkit.py findings reindex
 python recon_prove.py run --target example.com --technique xss_reflect
-# confirmed proof â‰ˆ C2; write impact manually for C3; /critic for triage-gate
+# confirmed proof ~= C2; write impact manually for C3; /critic for triage-gate
 ```
 
-Details: **`skills/README.md`** Â· **`skills/SKILLS_INDEX.md`** Â· **USAGE.md Â§21** Â· **OPERATIONS.md Â§14**.
+Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **USAGE.md section 21**  /  **OPERATIONS.md section 14**.
 
-**Exploit path:** C1 → `/prove` (C2) → PoC draft → human impact (C3) → triage (C4).  
+**Exploit path:** C1 -> `/prove` (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
 No reverse shells / dumps / spray lists in the default path.
 
 ## Safety
