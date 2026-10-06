@@ -43,7 +43,7 @@ python recon_dashboard.py
 /session show|set|clear
 /har import  /inbox  /evidence  /wordlist-target
 /target /verbose /rate
-/run /quick /full /scan /playbook   # /run is BACKGROUND by default; --fg to block
+/run /quick /full /scan /playbook   # background by default; --fg blocks; --review writes phase notes
 /pause /resume /stop /jobs
 /findings reindex
 /program list|show|set

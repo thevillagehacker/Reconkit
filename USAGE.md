@@ -384,7 +384,34 @@ Each tool also writes as soon as it finishes:
 ~/.reconkit/output/example.com/tools/crawl/katana.txt
 ```
 
-The merged `subdomains.txt` / `urls.txt` are updated after **every** tool (you do not wait for amass). Amass is last and killed after 180s (`RECON_AMASS_TIMEOUT`). `/stop` kills a hung process.
+The merged `subdomains.txt` / `urls.txt` are updated after **every** tool (you do not wait for amass). While a tool is still running, `tools/<stage>/<tool>.txt` grows as stdout arrives. Amass is last and killed after 180s (`RECON_AMASS_TIMEOUT`). Other long tools have their own caps (partial output is kept, the next tool still runs):
+
+```
+RECON_SUBDOMAIN_TIMEOUT   180s   subfinder, assetfinder, findomain, chaos
+RECON_DNSX_TIMEOUT        300s   dnsx
+RECON_HTTPX_TIMEOUT       600s   the main httpx probe
+RECON_HTTPX_HOST_TIMEOUT   60s   one host (sensitive paths, wildcard check)
+RECON_TLSX_TIMEOUT        300s   tlsx
+RECON_CRAWL_TIMEOUT       600s   katana, gau, waybackurls
+RECON_CRAWL_HOST_TIMEOUT   90s   gospider / hakrawler, per host
+RECON_NUCLEI_TIMEOUT      900s   each nuclei pack
+RECON_PARAMS_TIMEOUT      180s   unfurl
+RECON_ARJUN_TIMEOUT       600s   arjun
+RECON_XSS_TIMEOUT         300s   kxss, dalfox
+RECON_CANARY_TIMEOUT      300s   sqli / ssrf / ssti pipes
+RECON_GF_TIMEOUT          120s   gf, uro
+RECON_CONTENT_TIMEOUT     180s   ffuf, per host
+```
+
+`/stop` kills a hung process. `--resume` skips a tool whose `tools/<stage>/<tool>.txt` is already non-empty. A run that predates per-tool files still skips the whole stage when the merge file exists. `--force` re-runs everything.
+
+Each run writes `run_meta.json` (modules, rate, whether a session was loaded -- never the cookie). Hosts dropped as out-of-scope or wildcard land in `tools/<stage>/dropped.txt`. `tech_routes.txt` maps what the run already saw onto `/prove` techniques. `param_priority.txt` is the short parameter list. `subdomains.txt.prev`, `alive.txt.prev`, and `urls.txt.prev` are the previous run, for the dashboard host diff.
+
+`--review` (shell alias `--supervisor`, or env `RECON_SUPERVISOR=1`) writes a short model note after each phase into `reviews/<phase>.txt`. The next phase starts while that note is still being written. Headings are Landed, Noise, Prove next, and Ignore. Line counts in the note are computed in code. Prove next names an allowed `/prove` technique, or `none`, and leaves the prove run to you. A missing key or a failed call is recorded in the note and the scan continues. An empty phase records the counts and skips the model. `--resume` keeps a note that is already newer than that phase's tool files. When the run finishes on its own, in-flight notes get up to 60s (`RECON_SUPERVISOR_JOIN`) and then `reviews/summary.txt` is written. `/stop` skips that summary. Each model call is capped at 45s (`RECON_SUPERVISOR_TIMEOUT`). The note uses the provider already set in `config/agent_config.json`. For xAI that is `XAI_API_KEY` and `https://api.x.ai/v1`. A one-shot `--review` stays on that run's thread, so the next `/run` stays quiet unless you ask again or export `RECON_SUPERVISOR=1`.
+
+```bash
+python reconkit.py run --target example.com --review
+```
 
 ### Shell shortcuts
 
@@ -393,6 +420,7 @@ The merged `subdomains.txt` / `urls.txt` are updated after **every** tool (you d
 /run example.com
 /run example.com --modules subdomains,dns,httpprobe
 /run example.com --resume
+/run example.com --review
 /run --scope-all --modules subdomains,dns,httpprobe
 /quick example.com          # subdomains + dns + httpprobe
 /full example.com           # all modules
@@ -696,7 +724,7 @@ Tab-completes slash names when readline is available.
 |---------|--------|---------|
 | `/modules` | | List modules |
 | `/scan` | `/scan [target]` | Module picker |
-| `/run` | `/run [t] [--modules a,b\|all] [--resume] [--scope-all]` | Pipeline |
+| `/run` | `/run [t] [--modules a,b\|all] [--resume] [--review] [--scope-all]` | Pipeline |
 | `/quick` | `/quick [target]` | Fast trio |
 | `/full` | `/full [target]` | All modules |
 | `/har` | `/har import <file.har> [t]` | Import in-scope URLs + Cookie |
@@ -2178,7 +2206,7 @@ Also:
 python reconkit.py checkenv|setup|verify|wordlists|modules
 python reconkit.py scope add|list|check ...
 python reconkit.py keys set|list|remove ...
-python reconkit.py run --target T [--modules a,b|all] [--resume] [--scope-all]
+python reconkit.py run --target T [--modules a,b|all] [--resume] [--review] [--scope-all]
 python reconkit.py [-v 0-3|--debug] run --target T
 python reconkit.py session show|set|clear ...
 python reconkit.py har --target T --file path.har

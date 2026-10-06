@@ -15,7 +15,7 @@ COMMANDS
   verify              Confirm which tools are actually on PATH
   scope add/list/check  Manage your authorized-target scope file (the safety gate)
   keys set/list/remove   Manage optional API keys (stored outside this script's source)
-  run --target <t> --modules <...> [--resume] [--scope-all]
+  run --target <t> --modules <...> [--resume] [--review] [--scope-all]
   session show|set|clear  Auth cookies/headers (~/.reconkit/session.json)
   har --target T --file F Import in-scope URLs + Cookie from a HAR
   evidence --target T     Zip output + proofs for a report pack
@@ -66,6 +66,7 @@ USAGE EXAMPLES
     python3 reconkit.py run --target example.com
     python3 reconkit.py run --target example.com --modules subdomains,dns,httpprobe,nuclei
     python3 reconkit.py run --target example.com --resume
+    python3 reconkit.py run --target example.com --review
     python3 reconkit.py run --scope-all --modules subdomains,dns,httpprobe
     python3 reconkit.py session set --cookie "sid=…" --header "Authorization: Bearer …"
     python3 reconkit.py har --target example.com --file capture.har
@@ -87,6 +88,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -538,8 +540,12 @@ def _xss_unique_marker_filter(lines: list[str]) -> list[str]:
         hit = pipeline(
             [["qsreplace", marker], ["httpx", "-silent", "-ms", marker, "-timeout", "8", *httpx_h_flags()]],
             input_data=("\n".join(urls[:cap]) + "\n").encode(),
+            timeout=tool_cap("canary"),
         )
     except Exception:
+        return lines
+    # A time cap with no body is "could not check", not "nothing reflected".
+    if _LAST_PIPE_RC == 124 and not (hit or b"").strip():
         return lines
     shapes = {
         _url_shape(ln.strip().split()[0])
@@ -1055,7 +1061,8 @@ def _ensure_log_dir() -> None:
 
 
 def _run_capture_live(
-    cmd: list[str], env: dict, check: bool, timeout: float | None = None
+    cmd: list[str], env: dict, check: bool, timeout: float | None = None,
+    on_stdout=None,
 ) -> subprocess.CompletedProcess:
     """Run a command capturing stdout/stderr while streaming both live (VERBOSE>=3).
 
@@ -1080,10 +1087,15 @@ def _run_capture_live(
     stderr_chunks: list[bytes] = []
     stopped = False
 
-    def _pump(stream, sink: list[bytes], tag: str) -> None:
+    def _pump(stream, sink: list[bytes], tag: str, is_stdout: bool = False) -> None:
         try:
             for raw in iter(stream.readline, b""):
                 sink.append(raw)
+                if is_stdout and on_stdout is not None:
+                    try:
+                        on_stdout(raw)
+                    except Exception:
+                        pass
                 text = raw.decode(errors="ignore").rstrip("\r\n")
                 print(f"{_c(f'[{tag}]', Colors.NEON_GREEN)} {text}")
         finally:
@@ -1092,8 +1104,12 @@ def _run_capture_live(
             except Exception:
                 pass
 
-    t_out = threading.Thread(target=_pump, args=(proc.stdout, stdout_chunks, "out"), daemon=True)
-    t_err = threading.Thread(target=_pump, args=(proc.stderr, stderr_chunks, "err"), daemon=True)
+    t_out = threading.Thread(
+        target=_pump, args=(proc.stdout, stdout_chunks, "out", True), daemon=True
+    )
+    t_err = threading.Thread(
+        target=_pump, args=(proc.stderr, stderr_chunks, "err", False), daemon=True
+    )
     t_out.start()
     t_err.start()
     t0 = time.time()
@@ -1149,7 +1165,8 @@ def _run_capture_live(
 
 
 def run(cmd: list[str], check: bool = False, env: dict | None = None,
-        capture: bool = False, timeout: float | None = None) -> subprocess.CompletedProcess:
+        capture: bool = False, timeout: float | None = None,
+        on_stdout=None) -> subprocess.CompletedProcess:
     """Run an external tool. Honors /pause and /stop (kills process group)."""
     from run_control import CONTROL, RunStopped, run_interruptible
 
@@ -1167,10 +1184,13 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
             # lost — it's logged to DEBUG_LOG every time, echoed as preview when
             # VERBOSE>=2, and fully streamed live when VERBOSE>=3.
             if VERBOSE >= VERBOSE_LIVE:
-                result = _run_capture_live(cmd, merged_env, check, timeout=timeout)
+                result = _run_capture_live(
+                    cmd, merged_env, check, timeout=timeout, on_stdout=on_stdout
+                )
             else:
                 result = run_interruptible(
-                    cmd, env=merged_env, capture=True, check=check, timeout=timeout
+                    cmd, env=merged_env, capture=True, check=check, timeout=timeout,
+                    on_stdout=on_stdout,
                 )
             elapsed = time.time() - t0
 
@@ -1203,12 +1223,26 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
         raise
 
 
-def pipeline(commands: list[list[str]], input_data: bytes = b"") -> bytes:
+# Set by pipeline() so callers can tell a time cap (124) from a real empty result.
+_LAST_PIPE_RC = 0
+
+
+def pipeline(
+    commands: list[list[str]],
+    input_data: bytes = b"",
+    timeout: float | None = None,
+    on_stdout=None,
+) -> bytes:
     """Chain a list of argv commands, piping stdout->stdin, like a shell pipe
     but without invoking a shell (no injection risk from target strings).
 
     Each stage is interruptible — /stop kills the active process group.
+    `timeout` is a per-command wall clock. On a cap, partial stdout of the
+    last command is returned. A cap before the last command does not forward
+    a half-built payload into the next tool (that would poison result files).
+    `on_stdout` receives raw chunks from the last command only, while it runs.
     """
+    global _LAST_PIPE_RC
     from run_control import CONTROL, RunStopped, run_interruptible
 
     merged_env = os.environ.copy()
@@ -1216,25 +1250,30 @@ def pipeline(commands: list[list[str]], input_data: bytes = b"") -> bytes:
     data = input_data
     in_lines = len(data.decode(errors="ignore").splitlines())
     debug(f"pipeline start: {in_lines} input line(s)")
+    _LAST_PIPE_RC = 0
 
-    for cmd in commands:
+    for idx, cmd in enumerate(commands):
         CONTROL.check()
+        is_last = idx == len(commands) - 1
         binary = which(cmd[0])
         if not binary:
             warn(f"'{cmd[0]}' not found on PATH; skipping this stage of the pipeline.")
             debug(f"pipeline aborted: '{cmd[0]}' missing")
+            _LAST_PIPE_RC = 127
             return b""
         full_cmd = [binary] + cmd[1:]
         _echo_cmd(full_cmd)
         t0 = time.time()
         try:
             proc = run_interruptible(
-                full_cmd, env=merged_env, capture=True, input_data=data
+                full_cmd, env=merged_env, capture=True, input_data=data,
+                timeout=timeout, on_stdout=on_stdout if is_last else None,
             )
         except RunStopped:
             warn(f"pipeline interrupted at {cmd[0]} by /stop")
             raise
         elapsed = time.time() - t0
+        _LAST_PIPE_RC = proc.returncode if proc.returncode is not None else -1
 
         _ensure_log_dir()
         with open(DEBUG_LOG, "a", encoding="utf-8", errors="replace") as logf:
@@ -1260,13 +1299,22 @@ def pipeline(commands: list[list[str]], input_data: bytes = b"") -> bytes:
             total = out_lines
             if total > 200:
                 live(f"{cmd[0]}|out  ... ({total - 200} more line(s) not shown)")
-        if proc.returncode not in (0, None) and out_lines == 0:
+        timed_out = proc.returncode == 124
+        if timed_out:
+            cap_s = int(timeout) if timeout is not None else 0
+            warn(f"{cmd[0]} hit the {cap_s}s cap — partial output kept")
+        elif proc.returncode not in (0, None) and out_lines == 0:
             warn(f"{cmd[0]} exited {proc.returncode} with empty output — see {DEBUG_LOG}")
         elif out_lines == 0 and in_lines > 0:
             debug(f"     ^ {cmd[0]} dropped all {in_lines} input line(s) to zero output — "
                   f"this is usually where a pipeline silently goes empty")
 
         data = strip_ansi_bytes(proc.stdout or b"")
+        if timed_out and not is_last:
+            warn(f"{cmd[0]} timed out before the pipe finished — later steps in this pipe are skipped")
+            return b""
+        if timed_out:
+            return data
         in_lines = out_lines
     return data
 
@@ -1327,6 +1375,348 @@ def save_tool_raw(outdir: Path, stage: str, tool: str, data: bytes | str, suffix
 def flush_merge(path: Path, items) -> int:
     """Rewrite the canonical merge file so it is visible before the stage ends."""
     return write_host_list(path, sorted(items) if not isinstance(items, list) else items)
+
+
+# Wall-clock caps. A timed-out tool keeps the bytes it already printed.
+# env, default seconds, minimum, maximum.
+_TOOL_CAPS: dict[str, tuple[str, int, int, int]] = {
+    "subdomain": ("RECON_SUBDOMAIN_TIMEOUT", 180, 30, 900),
+    "dnsx": ("RECON_DNSX_TIMEOUT", 300, 30, 1800),
+    "httpx": ("RECON_HTTPX_TIMEOUT", 600, 30, 3600),
+    "httpx-host": ("RECON_HTTPX_HOST_TIMEOUT", 60, 10, 600),
+    "tlsx": ("RECON_TLSX_TIMEOUT", 300, 30, 1800),
+    "crawl": ("RECON_CRAWL_TIMEOUT", 600, 30, 3600),
+    "crawl-host": ("RECON_CRAWL_HOST_TIMEOUT", 90, 15, 600),
+    "params": ("RECON_PARAMS_TIMEOUT", 180, 15, 1800),
+    "arjun": ("RECON_ARJUN_TIMEOUT", 600, 30, 3600),
+    "nuclei": ("RECON_NUCLEI_TIMEOUT", 900, 60, 3600),
+    "content": ("RECON_CONTENT_TIMEOUT", 180, 20, 1800),
+    "xss": ("RECON_XSS_TIMEOUT", 300, 30, 1800),
+    "canary": ("RECON_CANARY_TIMEOUT", 300, 30, 1800),
+    "gf": ("RECON_GF_TIMEOUT", 120, 10, 600),
+}
+
+_DROP_COUNTS: dict[tuple[str, str], int] = {}
+_DROP_CAP = 2000
+
+# Interesting parameter names for param_priority.txt (detection hints only).
+_PARAM_HINTS = (
+    "id", "user", "account", "uid", "file", "path", "url", "uri", "redirect",
+    "next", "dest", "callback", "template", "query", "search", "token", "key",
+    "email", "doc", "page", "folder", "img", "image", "cmd", "exec", "debug",
+)
+
+# Tech string seen in httpx/js output -> existing /prove technique. No new attacks.
+_TECH_PROVE = (
+    ("graphql", "graphql_typename"),
+    ("jenkins", "nuclei_recheck"),
+    ("grafana", "nuclei_recheck"),
+    ("gitlab", "nuclei_recheck"),
+    ("kubernetes", "nuclei_recheck"),
+    ("minio", "nuclei_recheck"),
+    ("wordpress", "nuclei_recheck"),
+    ("tomcat", "nuclei_recheck"),
+)
+
+
+def tool_cap(key: str) -> float:
+    """Seconds for a tool family. Bad env values fall back to the default."""
+    env, default, lo, hi = _TOOL_CAPS[key]
+    try:
+        val = int(os.environ.get(env) or default)
+    except (TypeError, ValueError):
+        val = default
+    return float(max(lo, min(val, hi)))
+
+
+def reset_run_bookkeeping() -> None:
+    _DROP_COUNTS.clear()
+
+
+def resume_active() -> bool:
+    return os.environ.get("RECON_RESUME") == "1"
+
+
+class LiveToolFile:
+    """Append stdout chunks to tools/<stage>/<tool>.txt while a process runs.
+
+    The pump thread calls write(). close() is safe to call twice. Callers that
+    have the full buffer should then save_tool_raw(), which replaces this file
+    with a cleaned copy. If the process is killed first, the flushed bytes stay.
+    """
+
+    def __init__(self, outdir: Path, stage: str, tool: str, suffix: str = ".txt"):
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", tool).strip("._") or "tool"
+        self.path = tool_dir(outdir, stage) / f"{safe}{suffix}"
+        self._lock = threading.Lock()
+        self._fh = open(self.path, "w", encoding="utf-8", newline="\n", errors="replace")
+        self._closed = False
+
+    def write(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        text = strip_ansi(chunk.decode("utf-8", errors="replace"))
+        with self._lock:
+            if self._closed:
+                return
+            self._fh.write(text)
+            self._fh.flush()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            try:
+                self._fh.close()
+            except Exception:
+                pass
+            self._closed = True
+
+
+def read_tool_bytes(outdir: Path, stage: str, tool: str, suffix: str = ".txt") -> bytes:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", tool).strip("._") or "tool"
+    path = outdir / "tools" / stage / f"{safe}{suffix}"
+    try:
+        if path.is_file():
+            return path.read_bytes()
+    except Exception:
+        pass
+    return b""
+
+
+def _tool_path(outdir: Path, stage: str, tool: str, suffix: str = ".txt") -> Path:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", tool).strip("._") or "tool"
+    return outdir / "tools" / stage / f"{safe}{suffix}"
+
+
+def tool_file_fresh(
+    outdir: Path, stage: str, tool: str,
+    input_path: Path | None = None, suffix: str = ".txt",
+) -> bool:
+    dest = _tool_path(outdir, stage, tool, suffix)
+    try:
+        if not dest.is_file() or dest.stat().st_size == 0:
+            return False
+        if input_path is None or not input_path.exists():
+            return True
+        return dest.stat().st_mtime + 1 >= input_path.stat().st_mtime
+    except Exception:
+        return False
+
+
+def should_skip_tool(
+    outdir: Path, stage: str, tool: str, input_path: Path | None = None,
+    suffix: str = ".txt",
+) -> bool:
+    """--resume only. A non-empty tool file newer than its input is done."""
+    if not resume_active():
+        return False
+    return tool_file_fresh(outdir, stage, tool, input_path, suffix=suffix)
+
+
+def resume_legacy_merge(outdir: Path, stage: str, *merges: Path) -> bool:
+    """Old runs have a merge file and no tools/<stage>/ files.
+
+    Those keep the previous --resume behavior (skip the stage). Once any
+    per-tool file exists, the stage continues and skips only finished tools.
+    """
+    if not resume_active():
+        return False
+    td = outdir / "tools" / stage
+    try:
+        if td.is_dir() and any(p.is_file() and p.stat().st_size > 0 for p in td.iterdir()):
+            return False
+    except Exception:
+        pass
+    for m in merges:
+        try:
+            if m.exists() and m.stat().st_size > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def pipe_into(
+    commands: list[list[str]],
+    input_data: bytes,
+    *,
+    outdir: Path,
+    stage: str,
+    tool: str,
+    cap_key: str,
+    suffix: str = ".txt",
+) -> bytes:
+    """Run a pipeline with a wall-clock cap and a live tools/ file.
+
+    The returned bytes are what later stages already consumed (the pipeline
+    result). A non-empty result is rewritten clean. An empty clean result
+    removes a 0-byte placeholder. A cap that printed bytes keeps that partial.
+    """
+    cap = tool_cap(cap_key)
+    live = LiveToolFile(outdir, stage, tool, suffix=suffix)
+    data = b""
+    try:
+        data = pipeline(commands, input_data=input_data, timeout=cap, on_stdout=live.write)
+    finally:
+        live.close()
+    if data:
+        save_tool_raw(outdir, stage, tool, data, suffix=suffix)
+    elif live.path.exists() and live.path.stat().st_size == 0:
+        try:
+            live.path.unlink()
+        except Exception:
+            pass
+    elif live.path.exists() and live.path.stat().st_size:
+        warn(f"{tool}: kept partial tools/{stage}/{live.path.name}")
+    return data
+
+
+def note_dropped(outdir: Path, stage: str, reason: str, value: str) -> None:
+    """Append one dropped host/URL. Capped so a noisy tool cannot fill the disk."""
+    value = (value or "").replace("\t", " ").replace("\n", " ").strip()
+    if not value:
+        return
+    key = (str(outdir), stage)
+    n = _DROP_COUNTS.get(key, 0)
+    if n >= _DROP_CAP:
+        return
+    _DROP_COUNTS[key] = n + 1
+    dest = tool_dir(outdir, stage) / "dropped.txt"
+    with dest.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"{reason}\t{value[:300]}\n")
+
+
+def snapshot_prev(path: Path) -> None:
+    """Copy a canonical file to <name>.prev before this stage rewrites it."""
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return
+        prev = path.with_name(path.name + ".prev")
+        shutil.copyfile(path, prev)
+    except Exception:
+        pass
+
+
+def _supervisor_meta_on() -> bool:
+    try:
+        from agents.supervisor import supervisor_enabled
+        return bool(supervisor_enabled())
+    except Exception:
+        return os.environ.get("RECON_SUPERVISOR") == "1"
+
+
+def write_run_meta(outdir: Path, target: str, modules: list[str]) -> None:
+    """Provenance for a run. No cookies, headers, or API keys."""
+    session_loaded = False
+    try:
+        from hunter.session import headers, headers_b
+        session_loaded = bool(headers() or headers_b())
+    except Exception:
+        session_loaded = False
+    meta = {
+        "target": target,
+        "modules": list(modules),
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "rate": os.environ.get("RECON_RATE") or "",
+        "resume": resume_active(),
+        "session_loaded": session_loaded,
+        "supervisor": _supervisor_meta_on(),
+        "python": sys.version.split()[0],
+        "tools_on_path": {
+            b: bool(which(b))
+            for b in (
+                "subfinder", "amass", "dnsx", "httpx", "naabu",
+                "katana", "nuclei", "ffuf",
+            )
+        },
+    }
+    write_utf8(outdir / "run_meta.json", json.dumps(meta, indent=2) + "\n")
+
+
+def write_param_priority(outdir: Path) -> None:
+    """Short list a hunter can attach to a prompt. Full URL lists stay on disk."""
+    names: list[str] = []
+    p = outdir / "param_names.txt"
+    if p.exists():
+        names = [ln.strip() for ln in p.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+    reflected: list[str] = []
+    x = outdir / "xss_reflected_params.txt"
+    if x.exists():
+        reflected = [
+            ln.strip() for ln in x.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()
+        ][:80]
+    ranked: list[str] = []
+    seen: set[str] = set()
+    for n in names:
+        low = n.lower()
+        if low in seen:
+            continue
+        if any(h == low or h in low for h in _PARAM_HINTS):
+            seen.add(low)
+            ranked.append(n)
+    lines: list[str] = []
+    if reflected:
+        lines.append("# reflected")
+        lines.extend(reflected)
+    if ranked:
+        lines.append("# interesting names")
+        lines.extend(ranked[:80])
+    if not lines:
+        return
+    text = "\n".join(lines) + "\n"
+    write_utf8(outdir / "param_priority.txt", text)
+    save_tool_raw(outdir, "params", "priority", text)
+
+
+def write_tech_routes(outdir: Path) -> None:
+    """Map what this run already saw onto /prove techniques. Does not run them."""
+    blob = ""
+    alive = outdir / "alive.txt"
+    if alive.exists():
+        blob += alive.read_text(encoding="utf-8", errors="replace").lower()
+    js = outdir / "js_secrets_and_endpoints.json"
+    if js.exists():
+        blob += "\n" + js.read_text(encoding="utf-8", errors="replace").lower()
+    urls = outdir / "urls.txt"
+    if urls.exists() and urls.stat().st_size < 2_000_000:
+        blob += "\n" + urls.read_text(encoding="utf-8", errors="replace").lower()
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    def add(technique: str, why: str) -> None:
+        if technique in seen:
+            return
+        seen.add(technique)
+        lines.append(f"{technique}\t{why}")
+
+    for needle, technique in _TECH_PROVE:
+        if needle in blob:
+            add(technique, f"{needle} seen in probe/js/url output — /prove run <target> --technique {technique}")
+    if "eyj" in blob or "jwt" in blob or "bearer " in blob:
+        add("jwt_inspect", "JWT-shaped material in JS or probe output — /prove run <target> --technique jwt_inspect")
+    for fname, technique, why in (
+        ("cname_takeover_candidates.txt", "takeover_fingerprint", "cname candidates file is non-empty"),
+        ("graphql_endpoints.txt", "graphql_typename", "graphql endpoints file is non-empty"),
+        ("xss_reflected_params.txt", "xss_reflect", "reflected parameters file is non-empty"),
+        ("cors_candidates.txt", "cors_origin", "cors candidates file is non-empty"),
+        ("redirect_hits.txt", "redirect_canary", "redirect hits file is non-empty"),
+        ("sqli_error_based.txt", "sqli_boolean", "sqli error candidates file is non-empty"),
+        ("ssti_candidates.txt", "ssti_math", "ssti candidates file is non-empty"),
+        ("ssrf_metadata_candidates.txt", "ssrf_canary_review", "ssrf candidates file is non-empty"),
+        ("idor_candidates.txt", "idor_session_diff", "idor candidates file is non-empty"),
+    ):
+        fp = outdir / fname
+        try:
+            if fp.exists() and fp.stat().st_size > 0:
+                add(technique, f"{why} — /prove run <target> --technique {technique}")
+        except Exception:
+            continue
+    if not lines:
+        return
+    text = "\n".join(lines) + "\n"
+    write_utf8(outdir / "tech_routes.txt", text)
+    save_tool_raw(outdir, "prove", "tech_routes", text)
 
 
 # --------------------------------------------------------------------------- #
@@ -2048,7 +2438,7 @@ def _amass_timeout_sec() -> int:
         return 180
 
 
-def _run_amass(path: str, target: str):
+def _run_amass(path: str, target: str, on_stdout=None):
     """Passive amass only, with a hard process cap (default 180s).
 
     Never run `amass enum -d` with no timeout — that is the hours-long hang.
@@ -2062,7 +2452,7 @@ def _run_amass(path: str, target: str):
     ]
     last = None
     for cmd in attempts:
-        last = run(cmd, capture=True, timeout=cap)
+        last = run(cmd, capture=True, timeout=cap, on_stdout=on_stdout)
         out = (last.stdout or b"").strip()
         err = (last.stderr or b"").decode(errors="ignore").lower()
         if last.returncode == 124:
@@ -2082,15 +2472,29 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
     step("Subdomain enumeration (subfinder, amass, assetfinder, chaos, findomain, crt.sh, wayback, hackertarget)",
          phase="subdomains")
     subs_file = outdir / "subdomains.txt"
+    if resume_legacy_merge(outdir, "subdomains", subs_file):
+        info("resume: subdomains.txt already present (no per-tool files to continue)")
+        return subs_file
+    snapshot_prev(subs_file)
     target_lower = target.lower()
     collected: set[str] = set()
 
-    def ingest(tool: str, data: bytes) -> int:
+    def ingest(tool: str, data: bytes, log_drops: bool = True) -> int:
         hosts: list[str] = []
         for ln in data.decode(errors="ignore").splitlines():
-            host = _normalize_host(ln)
-            if host and is_valid_hostname(host) and host_belongs_to_target(host, target_lower):
-                hosts.append(host)
+            raw = ln.strip()
+            host = _normalize_host(raw)
+            if not host:
+                continue
+            if not is_valid_hostname(host):
+                if log_drops:
+                    note_dropped(outdir, "subdomains", "invalid", raw[:200])
+                continue
+            if not host_belongs_to_target(host, target_lower):
+                if log_drops:
+                    note_dropped(outdir, "subdomains", "out-of-scope", host)
+                continue
+            hosts.append(host)
         save_tool_raw(outdir, "subdomains", tool, "\n".join(hosts))
         before = len(collected)
         collected.update(hosts)
@@ -2131,14 +2535,30 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
             else:
                 warn(f"{binary} not found; skipping.")
             continue
+        if should_skip_tool(outdir, "subdomains", binary, None):
+            info(f"resume: skip {binary} (tools/subdomains/{binary}.txt is fresh)")
+            added = ingest(binary, read_tool_bytes(outdir, "subdomains", binary), log_drops=False)
+            if checklist:
+                checklist.finish_tool(binary, added)
+            continue
         if checklist:
             checklist.start_tool(binary)
-        if binary == "amass":
-            result = _run_amass(path, target)
-        else:
-            result = run([path] + args, capture=True)
-        added = ingest(binary, result.stdout or b"")
-        rc = result.returncode
+        live = LiveToolFile(outdir, "subdomains", binary)
+        try:
+            if binary == "amass":
+                result = _run_amass(path, target, on_stdout=live.write)
+            else:
+                cap = tool_cap("subdomain")
+                info(f"{binary}: hard cap {int(cap)}s (set RECON_SUBDOMAIN_TIMEOUT to change)")
+                result = run(
+                    [path] + args, capture=True, timeout=cap, on_stdout=live.write,
+                )
+        finally:
+            live.close()
+        if result is not None and result.returncode == 124:
+            warn(f"{binary} hit the time cap — keeping partial names")
+        added = ingest(binary, (result.stdout if result else b"") or b"")
+        rc = result.returncode if result is not None else None
         if checklist:
             checklist.finish_tool(binary, added)
         if added == 0:
@@ -2224,7 +2644,11 @@ def _maybe_filter_wildcard_dns(target: str, collected: set[str], outdir: Path) -
         return
     nonce = f"rk-wc-{os.urandom(3).hex()}.{_normalize_host(target)}"
     try:
-        r = pipeline([["dnsx", "-silent", "-a", "-resp-only"]], input_data=(nonce + "\n").encode())
+        r = pipeline(
+            [["dnsx", "-silent", "-a", "-resp-only"]],
+            input_data=(nonce + "\n").encode(),
+            timeout=tool_cap("httpx-host"),
+        )
     except Exception:
         return
     ips = [ln.strip() for ln in r.decode(errors="ignore").splitlines() if ln.strip()]
@@ -2266,6 +2690,7 @@ def _filter_wildcard_http(alive_file: Path, outdir: Path, target: str) -> None:
         probe = pipeline(
             [["httpx", "-silent", "-title", "-status-code", "-timeout", "10", *httpx_h_flags()]],
             input_data=(nonce + "\n").encode(),
+            timeout=tool_cap("httpx-host"),
         )
     except Exception:
         return
@@ -2289,6 +2714,7 @@ def _filter_wildcard_http(alive_file: Path, outdir: Path, target: str) -> None:
             continue
         if _http_fingerprint(raw) == nonce_fp:
             dropped += 1
+            note_dropped(outdir, "httpprobe", "wildcard-http", host or raw[:200])
             continue
         kept.append(raw)
     if dropped:
@@ -2306,6 +2732,17 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
     if not dnsx or not subs_file.exists():
         warn("dnsx not found or no subdomains file; skipping DNS stage.")
         return
+    if resume_legacy_merge(outdir, "dns", outdir / "dns_records.txt", outdir / "resolved.txt"):
+        info("resume: dns output already present (no per-tool files to continue)")
+        return
+    if (
+        should_skip_tool(outdir, "dns", "dnsx-resolved", subs_file)
+        and should_skip_tool(outdir, "dns", "dnsx-records", subs_file)
+        and should_skip_tool(outdir, "dns", "dnsx-cname", subs_file)
+    ):
+        info("resume: dns tool files are fresh")
+        return
+    snapshot_prev(outdir / "resolved.txt")
 
     n_subs = len([ln for ln in subs_file.read_text(errors="ignore").splitlines() if ln.strip()])
     info(f"📡 resolving / fingerprinting {n_subs} host(s) via dnsx…")
@@ -2324,14 +2761,27 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
     if cl:
         cl.start_tool("dnsx-records")
     # Hosts that actually resolve (hunter: enum → resolve → httpx).
-    resolved = pipeline([["dnsx", "-silent"]], input_data=subs_data)
+    if should_skip_tool(outdir, "dns", "dnsx-resolved", subs_file):
+        info("resume: skip dnsx-resolved")
+        resolved = read_tool_bytes(outdir, "dns", "dnsx-resolved")
+    else:
+        resolved = pipe_into(
+            [["dnsx", "-silent"]], subs_data,
+            outdir=outdir, stage="dns", tool="dnsx-resolved", cap_key="dnsx",
+        )
     n_res = write_host_list(
         outdir / "resolved.txt",
         strip_ansi(resolved.decode(errors="ignore")).splitlines(),
     )
-    records = pipeline([
-        ["dnsx", "-silent", "-a", "-aaaa", "-cname", "-mx", "-ns", "-txt", "-resp"],
-    ], input_data=subs_data)
+    if should_skip_tool(outdir, "dns", "dnsx-records", subs_file):
+        info("resume: skip dnsx-records")
+        records = read_tool_bytes(outdir, "dns", "dnsx-records")
+    else:
+        records = pipe_into(
+            [["dnsx", "-silent", "-a", "-aaaa", "-cname", "-mx", "-ns", "-txt", "-resp"]],
+            subs_data,
+            outdir=outdir, stage="dns", tool="dnsx-records", cap_key="dnsx",
+        )
     rec_text = strip_ansi(records.decode(errors="ignore"))
     rec_lines = [ln.strip() for ln in rec_text.splitlines() if ln.strip()]
     write_utf8(outdir / "dns_records.txt", "\n".join(rec_lines) + ("\n" if rec_lines else ""))
@@ -2344,7 +2794,14 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
     if cl:
         cl.start_tool("dnsx-cname")
     # -resp keeps "host [CNAME] target" — -resp-only is just the target (useless for takeover).
-    cname_out = pipeline([["dnsx", "-silent", "-cname", "-resp"]], input_data=subs_data)
+    if should_skip_tool(outdir, "dns", "dnsx-cname", subs_file):
+        info("resume: skip dnsx-cname")
+        cname_out = read_tool_bytes(outdir, "dns", "dnsx-cname")
+    else:
+        cname_out = pipe_into(
+            [["dnsx", "-silent", "-cname", "-resp"]], subs_data,
+            outdir=outdir, stage="dns", tool="dnsx-cname", cap_key="dnsx",
+        )
     takeover_candidates = [
         ln for ln in strip_ansi(cname_out.decode(errors="ignore")).splitlines()
         if ln.strip() and any(fp in ln.lower() for fp in CNAME_TAKEOVER_FINGERPRINTS)
@@ -2367,6 +2824,10 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
         warn("httpx not found or no subdomains file; skipping.")
         alive_file.write_text("")
         return alive_file
+    if resume_legacy_merge(outdir, "httpprobe", alive_file):
+        info("resume: alive.txt already present (no per-tool files to continue)")
+        return alive_file
+    snapshot_prev(alive_file)
     resolved = outdir / "resolved.txt"
     probe_src = resolved if resolved.exists() and resolved.stat().st_size else subs_file
     input_count = len([ln for ln in probe_src.read_text(errors="ignore").splitlines() if ln.strip()])
@@ -2382,16 +2843,35 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
     except Exception:
         cl = None
     from hunter.session import httpx_h_flags
-    result = pipeline([
-        ["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
-         "-title", "-sc", "-td", "-fr", *httpx_h_flags()],
-    ], input_data=probe_src.read_bytes())
-    if not result.strip():
-        # Older httpx builds use long flag names
-        result = pipeline([
-            ["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
-             "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()],
-        ], input_data=probe_src.read_bytes())
+    probe_bytes = probe_src.read_bytes()
+    if should_skip_tool(outdir, "httpprobe", "httpx", probe_src):
+        info("resume: skip httpx (tools/httpprobe/httpx.txt is fresh)")
+        if alive_file.exists() and alive_file.stat().st_size:
+            try:
+                write_tech_routes(outdir)
+            except Exception:
+                pass
+            if cl:
+                cl.finish_tool("httpx", skipped=True, detail="resume")
+                cl.stop(final_msg="HTTP probe")
+            return alive_file
+        result = read_tool_bytes(outdir, "httpprobe", "httpx")
+    else:
+        result = pipe_into(
+            [["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
+              "-title", "-sc", "-td", "-fr", *httpx_h_flags()]],
+            probe_bytes,
+            outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
+        )
+        if not result.strip():
+            # Older httpx builds use long flag names. A real empty probe still retries.
+            # A time cap that printed nothing also retries once with the long flags.
+            result = pipe_into(
+                [["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
+                  "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()]],
+                probe_bytes,
+                outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
+            )
     text = strip_ansi(result.decode("utf-8", errors="replace"))
     write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
     _filter_wildcard_http(alive_file, outdir, outdir.name)
@@ -2420,6 +2900,10 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
              f"stderr. Common causes: the target's WAF/CDN rate-limiting this many "
              f"concurrent probes, or most subdomains genuinely being dead/parked. Try "
              f"re-running with fewer threads if you suspect rate-limiting.")
+    try:
+        write_tech_routes(outdir)
+    except Exception:
+        pass
     return alive_file
 
 
@@ -2428,6 +2912,9 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
     tlsx = which("tlsx")
     if not tlsx or not alive_file.exists():
         warn("tlsx not found or no alive-hosts file; skipping.")
+        return
+    if resume_legacy_merge(outdir, "tls", outdir / "tls_recon.json"):
+        info("resume: tls_recon.json already present (no per-tool files to continue)")
         return
     host_list = [ln.split()[0] for ln in alive_file.read_bytes().splitlines() if ln.strip()]
     info(f"🔐 TLS recon on {len(host_list)} alive host(s)…")
@@ -2438,12 +2925,25 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
         cl.start_tool("tlsx")
     except Exception:
         cl = None
-    result = pipeline([
-        ["tlsx", "-silent", "-json", "-expired",
-         "-self-signed", "-mismatched", "-jarm"],
-    ], input_data=hosts)
-    if not result.strip():
-        result = pipeline([["tlsx", "-silent", "-json"]], input_data=hosts)
+    if should_skip_tool(outdir, "tls", "tlsx", alive_file, suffix=".json"):
+        info("resume: skip tlsx")
+        if (outdir / "tls_recon.json").exists():
+            if cl:
+                cl.finish_tool("tlsx", skipped=True, detail="resume")
+                cl.stop(final_msg="TLS")
+            return
+        result = read_tool_bytes(outdir, "tls", "tlsx", suffix=".json")
+    else:
+        result = pipe_into(
+            [["tlsx", "-silent", "-json", "-expired", "-self-signed", "-mismatched", "-jarm"]],
+            hosts,
+            outdir=outdir, stage="tls", tool="tlsx", cap_key="tlsx", suffix=".json",
+        )
+        if not result.strip():
+            result = pipe_into(
+                [["tlsx", "-silent", "-json"]], hosts,
+                outdir=outdir, stage="tls", tool="tlsx", cap_key="tlsx", suffix=".json",
+            )
     n = len([ln for ln in result.decode(errors="ignore").splitlines() if ln.strip()])
     if cl:
         cl.finish_tool("tlsx", n)
@@ -2459,6 +2959,10 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         warn("No alive-hosts file; skipping crawl.")
         urls_file.write_text("")
         return urls_file
+    if resume_legacy_merge(outdir, "crawl", urls_file):
+        info("resume: urls.txt already present (no per-tool files to continue)")
+        return urls_file
+    snapshot_prev(urls_file)
 
     target = outdir.name
     urls_clean = outdir / "alive_urls.txt"
@@ -2472,6 +2976,9 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
 
     def ingest_urls(tool: str, lines) -> int:
         raw = [strip_ansi(str(x)).strip() for x in lines if str(x).strip()]
+        for u in raw:
+            if u.startswith("http") and not url_belongs_to_target(u, target):
+                note_dropped(outdir, "crawl", "out-of-scope", u[:300])
         kept = filter_urls_to_target(raw, target)
         save_tool_raw(outdir, "crawl", tool, "\n".join(kept))
         before = len(collected)
@@ -2502,15 +3009,21 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         before = len(collected)
         clean_input = ("\n".join(hosts) + "\n").encode()
         from hunter.session import httpx_h_flags
-        result = pipeline(
-            [["katana", "-silent", "-d", _katana_depth(), "-jc", *httpx_h_flags()]],
-            input_data=clean_input,
-        )
-        if not result.strip():
-            result = pipeline(
-                [["katana", "-silent", "-d", _katana_depth()]],
-                input_data=clean_input,
+        if should_skip_tool(outdir, "crawl", "katana", alive_file):
+            info("resume: skip katana")
+            result = read_tool_bytes(outdir, "crawl", "katana")
+        else:
+            result = pipe_into(
+                [["katana", "-silent", "-d", _katana_depth(), "-jc", *httpx_h_flags()]],
+                clean_input,
+                outdir=outdir, stage="crawl", tool="katana", cap_key="crawl",
             )
+            if not result.strip():
+                result = pipe_into(
+                    [["katana", "-silent", "-d", _katana_depth()]],
+                    clean_input,
+                    outdir=outdir, stage="crawl", tool="katana", cap_key="crawl",
+                )
         ingest_urls("katana", strip_ansi(result.decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("katana", len(collected) - before)
@@ -2533,13 +3046,32 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     if gospider and hosts:
         if checklist:
             checklist.start_tool("gospider")
-        gs_buf: list[str] = []
-        def _gs(host):
-            _rate_delay()
-            r = run([gospider, "-s", host, "-c", "10", "-d", "3", "-q"], capture=True)
-            gs_buf.extend(_extract_urls((r.stdout or b"").decode(errors="ignore")))
-        _host_loop("gospider", hosts[:crawl_n], _gs)
-        added = ingest_urls("gospider", gs_buf)
+        if should_skip_tool(outdir, "crawl", "gospider", alive_file):
+            info("resume: skip gospider")
+            added = ingest_urls(
+                "gospider",
+                read_tool_bytes(outdir, "crawl", "gospider").decode(errors="ignore").splitlines(),
+            )
+        else:
+            gs_buf: list[str] = []
+            gs_live = LiveToolFile(outdir, "crawl", "gospider")
+            host_cap = tool_cap("crawl-host")
+
+            def _gs(host):
+                _rate_delay()
+                r = run(
+                    [gospider, "-s", host, "-c", "10", "-d", "3", "-q"],
+                    capture=True, timeout=host_cap, on_stdout=gs_live.write,
+                )
+                if r.returncode == 124:
+                    warn(f"gospider hit the {int(host_cap)}s cap on {host}")
+                gs_buf.extend(_extract_urls((r.stdout or b"").decode(errors="ignore")))
+
+            try:
+                _host_loop("gospider", hosts[:crawl_n], _gs)
+            finally:
+                gs_live.close()
+            added = ingest_urls("gospider", gs_buf)
         if checklist:
             checklist.finish_tool("gospider", added)
     else:
@@ -2552,13 +3084,33 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     if hakrawler and hosts:
         if checklist:
             checklist.start_tool("hakrawler")
-        hk_buf: list[str] = []
-        def _hk(host):
-            _rate_delay()
-            r = pipeline([["hakrawler", "-d", "3", "-subs", "-u"]], input_data=(host + "\n").encode())
-            hk_buf.extend(r.decode(errors="ignore").splitlines())
-        _host_loop("hakrawler", hosts[:crawl_n], _hk)
-        added = ingest_urls("hakrawler", hk_buf)
+        if should_skip_tool(outdir, "crawl", "hakrawler", alive_file):
+            info("resume: skip hakrawler")
+            added = ingest_urls(
+                "hakrawler",
+                read_tool_bytes(outdir, "crawl", "hakrawler").decode(errors="ignore").splitlines(),
+            )
+        else:
+            hk_buf: list[str] = []
+            hk_live = LiveToolFile(outdir, "crawl", "hakrawler")
+            host_cap = tool_cap("crawl-host")
+
+            def _hk(host):
+                _rate_delay()
+                r = pipeline(
+                    [["hakrawler", "-d", "3", "-subs", "-u"]],
+                    input_data=(host + "\n").encode(),
+                    timeout=host_cap, on_stdout=hk_live.write,
+                )
+                if _LAST_PIPE_RC == 124:
+                    warn(f"hakrawler hit the {int(host_cap)}s cap on {host}")
+                hk_buf.extend(r.decode(errors="ignore").splitlines())
+
+            try:
+                _host_loop("hakrawler", hosts[:crawl_n], _hk)
+            finally:
+                hk_live.close()
+            added = ingest_urls("hakrawler", hk_buf)
         if checklist:
             checklist.finish_tool("hakrawler", added)
     else:
@@ -2572,12 +3124,31 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         if checklist:
             checklist.start_tool("gau")
         before = len(collected)
-        # One pass on the apex with --subs (per-host gau duplicates the same archive).
-        r = run([gau, "--subs", "--threads", "10", target], capture=True)
-        err = (r.stderr or b"").decode(errors="ignore").lower()
-        if r.returncode != 0 and ("unknown" in err or "flag" in err):
-            r = run([gau, "--threads", "10", target], capture=True)
-        ingest_urls("gau", strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
+        if should_skip_tool(outdir, "crawl", "gau", None):
+            info("resume: skip gau")
+            raw_gau = read_tool_bytes(outdir, "crawl", "gau")
+        else:
+            # One pass on the apex with --subs (per-host gau duplicates the same archive).
+            gau_live = LiveToolFile(outdir, "crawl", "gau")
+            try:
+                r = run(
+                    [gau, "--subs", "--threads", "10", target],
+                    capture=True, timeout=tool_cap("crawl"), on_stdout=gau_live.write,
+                )
+                err = (r.stderr or b"").decode(errors="ignore").lower()
+                if r.returncode not in (0, 124) and ("unknown" in err or "flag" in err):
+                    gau_live.close()
+                    gau_live = LiveToolFile(outdir, "crawl", "gau")
+                    r = run(
+                        [gau, "--threads", "10", target],
+                        capture=True, timeout=tool_cap("crawl"), on_stdout=gau_live.write,
+                    )
+                if r.returncode == 124:
+                    warn("gau hit the crawl time cap — keeping partial URLs")
+                raw_gau = r.stdout or b""
+            finally:
+                gau_live.close()
+        ingest_urls("gau", strip_ansi(raw_gau.decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("gau", len(collected) - before)
     else:
@@ -2591,8 +3162,22 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         if checklist:
             checklist.start_tool("waybackurls")
         before = len(collected)
-        r = run([waybackurls, target], capture=True)
-        ingest_urls("waybackurls", strip_ansi((r.stdout or b"").decode(errors="ignore")).splitlines())
+        if should_skip_tool(outdir, "crawl", "waybackurls", None):
+            info("resume: skip waybackurls")
+            raw_wb = read_tool_bytes(outdir, "crawl", "waybackurls")
+        else:
+            wb_live = LiveToolFile(outdir, "crawl", "waybackurls")
+            try:
+                r = run(
+                    [waybackurls, target], capture=True,
+                    timeout=tool_cap("crawl"), on_stdout=wb_live.write,
+                )
+                if r.returncode == 124:
+                    warn("waybackurls hit the crawl time cap — keeping partial URLs")
+                raw_wb = r.stdout or b""
+            finally:
+                wb_live.close()
+        ingest_urls("waybackurls", strip_ansi(raw_wb.decode(errors="ignore")).splitlines())
         if checklist:
             checklist.finish_tool("waybackurls", len(collected) - before)
     else:
@@ -2609,10 +3194,17 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
     # Drop CDNs / third-party hosts — they waste XSS/SQLi/JS and create FPs.
     collected = set(filter_urls_to_target(collected, target))
     if uro and collected:
-        deduped = pipeline([["uro"]], input_data="\n".join(collected).encode())
-        url_list = filter_urls_to_target(
-            deduped.decode(errors="ignore").splitlines(), target
+        deduped = pipe_into(
+            [["uro"]], "\n".join(collected).encode(),
+            outdir=outdir, stage="crawl", tool="uro", cap_key="gf",
         )
+        if deduped.strip():
+            url_list = filter_urls_to_target(
+                deduped.decode(errors="ignore").splitlines(), target
+            )
+        else:
+            url_list = sorted(collected)
+            warn("uro returned nothing — keeping the in-scope URL set")
     else:
         url_list = sorted(collected)
     collapsed = collapse_url_shapes(url_list)
@@ -2638,6 +3230,7 @@ def stage_js(urls_file: Path, outdir: Path) -> Path:
         if re.search(r"\.js(\?|$)", u) and url_belongs_to_target(u, target)
     })
     write_utf8(js_file, "\n".join(js_urls) + ("\n" if js_urls else ""))
+    save_tool_raw(outdir, "js", "js_urls", "\n".join(js_urls))
     ok(f"{len(js_urls)} JS files -> {js_file}")
 
     curl = which("curl")
@@ -2668,7 +3261,9 @@ def stage_js(urls_file: Path, outdir: Path) -> Path:
         hp.close()
 
     secrets_file = outdir / "js_secrets_and_endpoints.json"
-    write_utf8(secrets_file, json.dumps({k: sorted(v) for k, v in findings.items() if v}, indent=2))
+    secrets_body = json.dumps({k: sorted(v) for k, v in findings.items() if v}, indent=2)
+    write_utf8(secrets_file, secrets_body)
+    save_tool_raw(outdir, "js", "secrets", secrets_body, suffix=".json")
     total = sum(len(v) for v in findings.values())
     ok(f"{total} candidate secrets/endpoints across {len([k for k,v in findings.items() if v])} "
        f"categories -> {secrets_file} (verify manually; these are pattern matches, not confirmed leaks)")
@@ -2691,7 +3286,14 @@ def stage_params(urls_file: Path, outdir: Path) -> None:
     if unfurl:
         if cl:
             cl.start_tool("unfurl")
-        keys = pipeline([["unfurl", "keys"]], input_data=urls_data)
+        if should_skip_tool(outdir, "params", "unfurl", urls_file):
+            info("resume: skip unfurl")
+            keys = read_tool_bytes(outdir, "params", "unfurl")
+        else:
+            keys = pipe_into(
+                [["unfurl", "keys"]], urls_data,
+                outdir=outdir, stage="params", tool="unfurl", cap_key="params",
+            )
         n = write_lines(outdir / "param_names.txt", keys)
         if cl:
             cl.finish_tool("unfurl", n)
@@ -2711,7 +3313,13 @@ def stage_params(urls_file: Path, outdir: Path) -> None:
         arjun_in = outdir / "arjun_input.txt"
         arjun_in.write_text("\n".join(lines[:cap]) + ("\n" if lines[:cap] else ""), encoding="utf-8")
         if lines[:cap]:
-            run([arjun, "-i", str(arjun_in), "-oT", str(outdir / "arjun_params.txt"), "--stable"])
+            run(
+                [arjun, "-i", str(arjun_in), "-oT", str(outdir / "arjun_params.txt"), "--stable"],
+                timeout=tool_cap("arjun"),
+            )
+            arjun_out = outdir / "arjun_params.txt"
+            if arjun_out.exists():
+                save_tool_raw(outdir, "params", "arjun", arjun_out.read_text(encoding="utf-8", errors="replace"))
         else:
             warn("arjun: no parameterized URLs to mine.")
         hits = 0
@@ -2730,6 +3338,10 @@ def stage_params(urls_file: Path, outdir: Path) -> None:
         warn("arjun not found; skipping hidden-parameter mining.")
     if cl:
         cl.stop(final_msg="Parameter mining")
+    try:
+        write_param_priority(outdir)
+    except Exception:
+        pass
 
 
 def stage_content_discovery(alive_file: Path, outdir: Path, wordlist: Path | None) -> None:
@@ -2749,19 +3361,32 @@ def stage_content_discovery(alive_file: Path, outdir: Path, wordlist: Path | Non
         subset = hosts[: _host_cap(25)]
         sensitive_hits = []
         hp = HostProgress("sensitive paths", total=len(subset), phase="content", verbose=VERBOSE) if HostProgress else None
-        for host in subset:
-            if hp:
-                hp.advance(host)
-            _rate_delay()
-            # httpx -path expects stdin of hosts; feed one at a time to keep output attributable
-            from hunter.session import httpx_h_flags
-            r = pipeline([["httpx", "-silent", "-mc", "200,204,301,302,401,403",
-                           "-path", ",".join(SENSITIVE_PATHS), *httpx_h_flags()]],
-                         input_data=(host + "\n").encode())
-            sensitive_hits.extend(r.decode(errors="ignore").splitlines())
+        sens_live = LiveToolFile(outdir, "content", "httpx-sensitive")
+        host_cap = tool_cap("httpx-host")
+        try:
+            for host in subset:
+                if hp:
+                    hp.advance(host)
+                _rate_delay()
+                # httpx -path expects stdin of hosts; feed one at a time to keep output attributable
+                from hunter.session import httpx_h_flags
+                r = pipeline(
+                    [["httpx", "-silent", "-mc", "200,204,301,302,401,403",
+                      "-path", ",".join(SENSITIVE_PATHS), *httpx_h_flags()]],
+                    input_data=(host + "\n").encode(),
+                    timeout=host_cap, on_stdout=sens_live.write,
+                )
+                if _LAST_PIPE_RC == 124:
+                    warn(f"httpx sensitive-path hit the {int(host_cap)}s cap on {host}")
+                sensitive_hits.extend(r.decode(errors="ignore").splitlines())
+        finally:
+            sens_live.close()
         if hp:
             hp.close()
-        write_lines(outdir / "sensitive_paths_found.txt", "\n".join(sensitive_hits).encode())
+        blob = "\n".join(sensitive_hits).encode()
+        write_lines(outdir / "sensitive_paths_found.txt", blob)
+        if sensitive_hits:
+            save_tool_raw(outdir, "content", "httpx-sensitive", blob)
         ok(f"Sensitive-path checks -> {outdir / 'sensitive_paths_found.txt'}")
     else:
         warn("httpx not found; skipping sensitive-path checks.")
@@ -2777,8 +3402,13 @@ def stage_content_discovery(alive_file: Path, outdir: Path, wordlist: Path | Non
                 hp.advance(host)
             _rate_delay()
             out_json = outdir / f"ffuf_{re.sub(r'[^A-Za-z0-9]+', '_', host)}.json"
-            run([ffuf, "-u", f"{host}/FUZZ", "-w", str(wordlist), "-mc", "200,301,302,403",
-                 "-ac", "-t", ffuf_t, "-o", str(out_json), "-of", "json"])
+            proc = run(
+                [ffuf, "-u", f"{host}/FUZZ", "-w", str(wordlist), "-mc", "200,301,302,403",
+                 "-ac", "-t", ffuf_t, "-o", str(out_json), "-of", "json"],
+                timeout=tool_cap("content"),
+            )
+            if proc.returncode == 124:
+                warn(f"ffuf hit the content cap on {host} — partial {out_json.name} kept")
         if hp:
             hp.close()
         ok(f"ffuf directory fuzzing results -> {outdir}/ffuf_*.json")
@@ -2807,7 +3437,10 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
     if gf:
         if cl:
             cl.start_tool("gf-xss")
-        xss_candidates = pipeline([["gf", "xss"]], input_data=urls_data)
+        xss_candidates = pipe_into(
+            [["gf", "xss"]], urls_data,
+            outdir=outdir, stage="xss", tool="gf", cap_key="gf",
+        )
         n = len([ln for ln in xss_candidates.decode(errors="ignore").splitlines() if ln.strip()])
         if cl:
             cl.finish_tool("gf-xss", n)
@@ -2822,7 +3455,10 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
     if kxss and xss_candidates.strip():
         if cl:
             cl.start_tool("kxss")
-        reflected = pipeline([["kxss"]], input_data=xss_candidates)
+        reflected = pipe_into(
+            [["kxss"]], xss_candidates,
+            outdir=outdir, stage="xss", tool="kxss", cap_key="xss",
+        )
         lines = [ln for ln in reflected.decode(errors="ignore").splitlines() if "Not Reflected" not in ln]
         lines = _xss_unique_marker_filter(lines)
         write_lines(outdir / "xss_reflected_params.txt", "\n".join(lines).encode())
@@ -2851,8 +3487,18 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
         if cl:
             cl.start_tool("dalfox")
         uro = which("uro")
-        piped = pipeline([["uro"]], input_data=dalfox_in) if uro else dalfox_in
-        result = pipeline([["dalfox", "pipe", "--silence", "--skip-bav"]], input_data=piped)
+        piped = dalfox_in
+        if uro:
+            deduped = pipe_into(
+                [["uro"]], dalfox_in,
+                outdir=outdir, stage="xss", tool="uro", cap_key="gf",
+            )
+            if deduped.strip():
+                piped = deduped
+        result = pipe_into(
+            [["dalfox", "pipe", "--silence", "--skip-bav"]], piped,
+            outdir=outdir, stage="xss", tool="dalfox", cap_key="xss",
+        )
         (outdir / "dalfox_results.txt").write_bytes(result)
         n = len([ln for ln in result.decode(errors="ignore").splitlines() if ln.strip()])
         if cl:
@@ -2864,6 +3510,11 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
         warn("dalfox not found or no parameterized/reflected URLs; skipping active XSS scan.")
     if cl:
         cl.stop(final_msg=f"XSS · {n_urls} URL(s)")
+    try:
+        write_param_priority(outdir)
+        write_tech_routes(outdir)
+    except Exception:
+        pass
 
 
 def stage_sqli(urls_file: Path, outdir: Path) -> None:
@@ -2887,7 +3538,10 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
     if cl:
         cl.start_tool("gf-sqli")
     if gf:
-        candidates = pipeline([["gf", "sqli"]], input_data=urls_data)
+        candidates = pipe_into(
+            [["gf", "sqli"]], urls_data,
+            outdir=outdir, stage="sqli", tool="gf", cap_key="gf",
+        )
     else:
         candidates = _parameterized_urls(urls_data)
         warn("gf not found (or patterns missing); SQLi checks limited to URLs with query parameters.")
@@ -2920,7 +3574,7 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
         cl.start_tool("error-canary")
     # httpx -ms is a literal substring, NOT a regex. Repeat the flag per needle.
     from hunter.session import httpx_h_flags as _sqli_h
-    errors = pipeline([
+    errors = pipe_into([
         ["qsreplace", "'"],
         ["httpx", "-silent",
          "-ms", "SQL syntax",
@@ -2934,7 +3588,7 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
          "-ms", "pg_query",
          "-ms", "You have an error in your SQL",
          *_sqli_h()],
-    ], input_data=candidates)
+    ], candidates, outdir=outdir, stage="sqli", tool="error-canary", cap_key="canary")
     n_err = write_lines(outdir / "sqli_error_based.txt", errors)
     if cl:
         cl.finish_tool("error-canary", n_err)
@@ -2943,13 +3597,13 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
         cl.start_tool("boolean-canary")
     # Differential: keep shapes that differ between true vs false payloads.
     # Treating every HTTP 200 after a true-payload as SQLi is a mass FP source.
-    true_json = pipeline(
+    true_json = pipe_into(
         [["qsreplace", "1' AND '1'='1"], ["httpx", "-silent", "-json", *_sqli_h()]],
-        input_data=candidates,
+        candidates, outdir=outdir, stage="sqli", tool="boolean-true", cap_key="canary",
     )
-    false_json = pipeline(
+    false_json = pipe_into(
         [["qsreplace", "1' AND '1'='2"], ["httpx", "-silent", "-json", *_sqli_h()]],
-        input_data=candidates,
+        candidates, outdir=outdir, stage="sqli", tool="boolean-false", cap_key="canary",
     )
     true_map = _httpx_json_by_shape(true_json)
     false_map = _httpx_json_by_shape(false_json)
@@ -3016,16 +3670,22 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
         warn("qsreplace/httpx not found; skipping SSRF/SSTI detection.")
         return
 
-    ssrf_candidates = pipeline([["gf", "ssrf"]], input_data=urls_data) if gf else _parameterized_urls(urls_data)
+    ssrf_candidates = (
+        pipe_into(
+            [["gf", "ssrf"]], urls_data,
+            outdir=outdir, stage="ssrf_ssti", tool="gf-ssrf", cap_key="gf",
+        )
+        if gf else _parameterized_urls(urls_data)
+    )
     if ssrf_candidates.strip():
         if cl:
             cl.start_tool("ssrf-metadata")
         # AWS metadata read-only probe — detection only, no credential use.
         from hunter.session import httpx_h_flags as _ssrf_h
-        metadata_hits = pipeline([
+        metadata_hits = pipe_into([
             ["qsreplace", "http://169.254.169.254/latest/meta-data/"],
             ["httpx", "-silent", "-match-string", "ami-id", *_ssrf_h()],
-        ], input_data=ssrf_candidates)
+        ], ssrf_candidates, outdir=outdir, stage="ssrf_ssti", tool="ssrf-metadata", cap_key="canary")
         n = write_lines(outdir / "ssrf_metadata_candidates.txt", metadata_hits)
         if cl:
             cl.finish_tool("ssrf-metadata", n)
@@ -3034,15 +3694,21 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
         if cl:
             cl.finish_tool("ssrf-metadata", skipped=True, detail="no candidates")
 
-    ssti_candidates = pipeline([["gf", "ssti"]], input_data=urls_data) if gf else _parameterized_urls(urls_data)
+    ssti_candidates = (
+        pipe_into(
+            [["gf", "ssti"]], urls_data,
+            outdir=outdir, stage="ssrf_ssti", tool="gf-ssti", cap_key="gf",
+        )
+        if gf else _parameterized_urls(urls_data)
+    )
     if ssti_candidates.strip():
         if cl:
             cl.start_tool("ssti-math")
         from hunter.session import httpx_h_flags as _ssti_h
-        arithmetic_hits = pipeline([
+        arithmetic_hits = pipe_into([
             ["qsreplace", SSTI_CANARY],
             ["httpx", "-silent", "-match-string", SSTI_EXPECTED, *_ssti_h()],
-        ], input_data=ssti_candidates)
+        ], ssti_candidates, outdir=outdir, stage="ssrf_ssti", tool="ssti-math", cap_key="canary")
         arithmetic_hits = _ssti_baseline_filter(arithmetic_hits)
         n = write_lines(outdir / "ssti_candidates.txt", arithmetic_hits)
         if cl:
@@ -3063,6 +3729,9 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
     if not nuclei:
         warn("nuclei not found; skipping.")
         return
+    if resume_legacy_merge(outdir, "nuclei", *list(outdir.glob("nuclei_*.txt"))):
+        info("resume: nuclei pack files already present (no per-tool files to continue)")
+        return
     # nuclei -l wants one URL/host per line. alive.txt includes title/status/tech.
     if alive_file.exists() and alive_file.stat().st_size:
         target_list = write_clean_alive_urls(alive_file, outdir)
@@ -3071,6 +3740,10 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
     if not target_list.exists() or target_list.stat().st_size == 0:
         warn("No target list available for nuclei; skipping.")
         return
+    # Freshness is the stage input, not target_list: write_clean_alive_urls
+    # rewrites that file at the start of every nuclei run and would look newer
+    # than every finished pack.
+    nuclei_input = alive_file if alive_file.exists() and alive_file.stat().st_size else subs_file
     n_t = len([ln for ln in target_list.read_text(errors="ignore").splitlines() if ln.strip()])
     info(f"💣 nuclei striking {n_t} host(s)…")
     # scan_activity wraps each nuclei pack below
@@ -3170,15 +3843,38 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
             checklist.start_tool(pack)
         rs = rate_settings()
         _rate_delay()
-        run(
+        pack_tool = Path(fname).stem
+        if should_skip_tool(outdir, "nuclei", pack_tool, nuclei_input) or (
+            resume_active() and out_path.exists() and out_path.stat().st_size > 0
+            and out_path.stat().st_mtime + 1 >= nuclei_input.stat().st_mtime
+        ):
+            info(f"resume: skip nuclei {pack}")
+            if out_path.exists():
+                save_tool_raw(
+                    outdir, "nuclei", pack_tool,
+                    out_path.read_text(encoding="utf-8", errors="replace"),
+                )
+            if checklist:
+                checklist.finish_tool(pack, skipped=True, detail="resume")
+            continue
+        nuc_cap = tool_cap("nuclei")
+        proc = run(
             [
                 nuclei, "-l", str(target_list), "-silent", "-o", str(out_path),
                 "-rl", str(rs.get("nuclei_rate") or 150),
                 "-c", str(rs.get("nuclei_conc") or 25),
             ]
             + extra_args
-            + sess_h
+            + sess_h,
+            timeout=nuc_cap,
         )
+        if proc.returncode == 124:
+            warn(f"nuclei {pack} hit the {int(nuc_cap)}s cap — partial {fname} kept, next pack continues")
+        if out_path.exists():
+            save_tool_raw(
+                outdir, "nuclei", pack_tool,
+                out_path.read_text(encoding="utf-8", errors="replace"),
+            )
         hits = 0
         try:
             if out_path.exists():
@@ -3197,16 +3893,28 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
             out_path = outdir / "nuclei_tech.txt"
             if checklist:
                 checklist.start_tool("tech")
-            run(
-                [
-                    nuclei, "-l", str(target_list), "-silent", "-o", str(out_path),
-                    "-tags", ",".join(tags),
-                    "-severity", general_severity,
-                    "-rl", str(rate_settings().get("nuclei_rate") or 150),
-                    "-c", str(rate_settings().get("nuclei_conc") or 25),
-                    *httpx_h_flags(),
-                ]
-            )
+            if should_skip_tool(outdir, "nuclei", "nuclei_tech", nuclei_input):
+                info("resume: skip nuclei tech")
+            else:
+                nuc_cap = tool_cap("nuclei")
+                proc = run(
+                    [
+                        nuclei, "-l", str(target_list), "-silent", "-o", str(out_path),
+                        "-tags", ",".join(tags),
+                        "-severity", general_severity,
+                        "-rl", str(rate_settings().get("nuclei_rate") or 150),
+                        "-c", str(rate_settings().get("nuclei_conc") or 25),
+                        *httpx_h_flags(),
+                    ],
+                    timeout=nuc_cap,
+                )
+                if proc.returncode == 124:
+                    warn(f"nuclei tech hit the {int(nuc_cap)}s cap — partial nuclei_tech.txt kept")
+            if out_path.exists():
+                save_tool_raw(
+                    outdir, "nuclei", "nuclei_tech",
+                    out_path.read_text(encoding="utf-8", errors="replace"),
+                )
             hits = 0
             if out_path.exists():
                 hits = sum(1 for ln in out_path.read_text(errors="ignore").splitlines() if ln.strip())
@@ -3463,6 +4171,11 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
             debug("    (no files created or changed by this stage)")
     elif VERBOSE >= VERBOSE_NORMAL:
         ok(f"stage {name} finished in {elapsed:.1f}s")
+    try:
+        from agents.supervisor import schedule_phase_review
+        schedule_phase_review(outdir, name)
+    except Exception:
+        pass
     return result
 
 
@@ -3541,61 +4254,103 @@ def cmd_run(args) -> None:
     wordlist = default_content_wordlist()
 
     resume = bool(getattr(args, "resume", False)) and not bool(getattr(args, "force", False))
-    if resume:
-        info("resume: skipping stages whose primary output already exists (--force to override)")
-
-    run_error: BaseException | None = None
+    review_on = False
+    prev_review = False
+    unbind_review = None
     try:
-        _cmd_run_stages(
-            modules, target, outdir, subs_file, alive_file, urls_file, wordlist,
-            resume=resume,
-        )
-    except Exception as e:
-        run_error = e
-        if e.__class__.__name__ == "RunStopped":
-            warn("pipeline stopped by operator (/stop)")
-        else:
-            fail(f"pipeline crashed: {type(e).__name__}: {e}")
-
-    if _PIPELINE is not None:
+        os.environ["RECON_RESUME"] = "1" if resume else "0"
+        reset_run_bookkeeping()
+        if resume:
+            info("resume: finished tools are skipped; stages with no per-tool files still skip as a whole (--force to override)")
         try:
-            _PIPELINE.finish(str(outdir))  # type: ignore[attr-defined]
-        except Exception:
+            from agents.supervisor import (
+                begin_run as supervisor_begin,
+                bind_review,
+                supervisor_requested,
+                unbind_review as _unbind_review,
+                wait_and_summarize,
+            )
+            review_on = supervisor_requested(bool(getattr(args, "review", False)))
+            prev_review = bind_review(review_on)
+            unbind_review = _unbind_review
+            if review_on:
+                supervisor_begin(outdir)
+                info("supervisor: phase notes land in reviews/ while the next phase starts")
+        except Exception as e:
+            warn(f"supervisor unavailable: {e}")
+            review_on = False
+            if unbind_review is not None:
+                unbind_review(prev_review)
+                unbind_review = None
+        try:
+            write_run_meta(outdir, target, modules)
+        except Exception as e:
+            warn(f"run_meta.json skipped: {e}")
+
+        run_error: BaseException | None = None
+        try:
+            _cmd_run_stages(
+                modules, target, outdir, subs_file, alive_file, urls_file, wordlist,
+                resume=resume,
+            )
+        except Exception as e:
+            run_error = e
+            if e.__class__.__name__ == "RunStopped":
+                warn("pipeline stopped by operator (/stop)")
+            else:
+                fail(f"pipeline crashed: {type(e).__name__}: {e}")
+
+        if _PIPELINE is not None:
+            try:
+                _PIPELINE.finish(str(outdir))  # type: ignore[attr-defined]
+            except Exception:
+                banner("Done")
+                print(f"All output saved under: {outdir}")
+        else:
             banner("Done")
             print(f"All output saved under: {outdir}")
-    else:
-        banner("Done")
-        print(f"All output saved under: {outdir}")
-    try:
-        from live_mission import finish_run
-        from run_control import CONTROL
-        if CONTROL.is_stopped() or (
-            run_error is not None and run_error.__class__.__name__ == "RunStopped"
-        ):
-            from live_mission import mark_stopped
-            mark_stopped()
-        elif run_error is not None:
-            finish_run(ok=False, outdir=str(outdir), message=str(run_error)[:200])
-        else:
-            finish_run(ok=True, outdir=str(outdir))
-    except Exception:
-        pass
-    _PIPELINE = None
-    if run_error is None:
+        stopped = run_error is not None and run_error.__class__.__name__ == "RunStopped"
         try:
-            from hunter.ops import notify_notable
-            from findings.indexer import index_target
-            _, fs = index_target(target)
-            n = sum(
-                1 for f in fs
-                if getattr(f, "ftype", "") == "vuln"
-                and getattr(f, "severity", "") in ("critical", "high", "medium")
-            )
-            notify_notable(target, n)
+            from live_mission import finish_run
+            from run_control import CONTROL
+            if CONTROL.is_stopped() or stopped:
+                from live_mission import mark_stopped
+                mark_stopped()
+                stopped = True
+            elif run_error is not None:
+                finish_run(ok=False, outdir=str(outdir), message=str(run_error)[:200])
+            else:
+                finish_run(ok=True, outdir=str(outdir))
         except Exception:
             pass
-    if run_error is not None and run_error.__class__.__name__ != "RunStopped":
-        raise run_error
+        _PIPELINE = None
+        if review_on:
+            if stopped:
+                info("supervisor: /stop -- in-flight notes can finish, summary is skipped")
+            else:
+                try:
+                    wait_and_summarize(outdir, target)
+                except Exception as e:
+                    warn(f"supervisor summary skipped: {e}")
+        if run_error is None:
+            try:
+                from hunter.ops import notify_notable
+                from findings.indexer import index_target
+                _, fs = index_target(target)
+                n = sum(
+                    1 for f in fs
+                    if getattr(f, "ftype", "") == "vuln"
+                    and getattr(f, "severity", "") in ("critical", "high", "medium")
+                )
+                notify_notable(target, n)
+            except Exception:
+                pass
+        if run_error is not None and not stopped:
+            raise run_error
+    finally:
+        os.environ.pop("RECON_RESUME", None)
+        if unbind_review is not None:
+            unbind_review(prev_review)
 
 
 def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, wordlist, resume=False):
@@ -3603,10 +4358,14 @@ def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, w
     from hunter.ops import should_skip_module
     from hunter import stages as H
 
+    # These stages skip finished tools themselves. A merge file from an older
+    # run (no tools/ directory) still short-circuits inside the stage.
+    tool_resume = {"subdomains", "dns", "httpprobe", "tls", "crawl", "nuclei"}
+
     def go(name, fn, *a, **k):
         if name not in modules:
             return None
-        if should_skip_module(name, outdir, resume):
+        if name not in tool_resume and should_skip_module(name, outdir, resume):
             warn(f"resume: skip {name} (output already present)")
             return None
         return run_stage(name, outdir, fn, *a, **k)
@@ -3688,6 +4447,12 @@ def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, w
 
     if "screenshots" in modules:
         go("screenshots", stage_screenshots, alive_file, outdir)
+
+    try:
+        write_param_priority(outdir)
+        write_tech_routes(outdir)
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------- #
@@ -3952,6 +4717,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--scope-all", dest="scope_all", action="store_true",
         help="Run against every authorized root in ~/.reconkit/scope.txt",
+    )
+    run_parser.add_argument(
+        "--review", "--supervisor", dest="review", action="store_true",
+        help="After each phase, ask the configured model for a note in reviews/. "
+             "The next phase starts while the note is written. RECON_SUPERVISOR=1 is the same switch.",
     )
     run_parser.set_defaults(func=cmd_run)
 

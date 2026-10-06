@@ -275,6 +275,7 @@ python reconkit.py run --target example.com
 python reconkit.py run --target example.com --modules subdomains,dns,httpprobe
 python reconkit.py run --target example.com --modules xss,sqli,ssrf_ssti,nuclei
 python reconkit.py run --target example.com --resume
+python reconkit.py run --target example.com --review
 python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 python reconkit.py -v 3 run --target example.com --modules subdomains
 ```
@@ -287,6 +288,7 @@ python reconkit.py -v 3 run --target example.com --modules subdomains
 /run example.com --modules all
 /run example.com --modules nuclei
 /run example.com --resume                 # skip stages whose output already exists
+/run example.com --review                 # model note per phase -> reviews/
 /run --scope-all --modules subdomains,dns,httpprobe
 /run example.com --fg                     # foreground (blocks shell; live spinner)
 /run example.com --modules subdomains,    # Tab -> module list after --modules
@@ -702,8 +704,17 @@ curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40"
 curl -s "http://127.0.0.1:8787/api/stats/charts?target=example.com"
 curl -s http://127.0.0.1:8787/api/program
 
-# Diff history
+# Diff history (findings snapshots)
 curl -s "http://127.0.0.1:8787/api/diff?target=example.com"
+
+# Host diff of the previous run (subdomains.txt, alive.txt, or urls.txt)
+curl -s "http://127.0.0.1:8787/api/diff?target=example.com&file=subdomains.txt"
+
+# Literal search inside that target's text files
+curl -s "http://127.0.0.1:8787/api/search?target=example.com&q=api.example.com"
+
+# Prompt: one file, or every file in a phase. stream:true returns text/event-stream.
+curl -s -X POST http://127.0.0.1:8787/api/prompt -H "Content-Type: application/json" -d "{\"prompt\":\"summarize\",\"target\":\"example.com\",\"phase\":\"subdomains\",\"stream\":false}"
 
 # File preview (inline JSON). Files > 2 MB set too_large + raw_url instead of content.
 curl -s "http://127.0.0.1:8787/api/file?target=example.com&path=subdomains.txt"
@@ -1177,16 +1188,20 @@ python reconkit.py evidence --target example.com --id <finding_id>
 ```bash
 python reconkit.py run --target example.com --resume
 python reconkit.py run --target example.com --force
+python reconkit.py run --target example.com --review
 python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 ```
 
 ```text
 /run example.com --resume
+/run example.com --review
 /run --scope-all --modules subdomains,dns,httpprobe
 ```
 
 `--resume` skips a module when its primary output already exists. `--force`
 overrides that. `--scope-all` iterates every root in `~/.reconkit/scope.txt`.
+`--review` writes `reviews/<phase>.txt` from the configured model after each
+phase and `reviews/summary.txt` when the run finishes. `/stop` skips the summary.
 
 ---
 

@@ -41,6 +41,17 @@ See **[HUNTER.md](HUNTER.md)**.
 | Hunter inbox (`/inbox`  /  dashboard **INBOX**  /  `/api/inbox`) | [x] |
 | SQLite findings query path (`findings/db.py`) | [x] |
 
+## Done in the hunt console
+
+| Item | Status |
+|------|--------|
+| Live `tools/<stage>/<tool>.txt` while the process runs | [x] |
+| Wall-clock caps for dnsx, httpx, tlsx, crawl, nuclei, params, canaries | [x] |
+| `--resume` skips a finished tool file | [x] |
+| `run_meta.json`, `dropped.txt`, `tech_routes.txt`, `param_priority.txt` | [x] |
+| Dashboard live tape, in-file search, host diff, phase prompt, streamed reply | [x] |
+| Opt-in phase reviewer (`--review`, notes in `reviews/`) | [x] |
+
 ## Still open (future)
 
 - Hypothesis agent + Kanban  

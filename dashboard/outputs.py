@@ -65,18 +65,28 @@ MERGED_PHASE = {
     "permute_raw.txt": "permute",
     "permute_resolved.txt": "permute",
     "wordlist_target.txt": "content",
+    "run_meta.json": "meta",
+    "tech_routes.txt": "prove",
+    "param_priority.txt": "params",
 }
+
+HOST_DIFF_FILES = {"subdomains.txt", "alive.txt", "urls.txt"}
 
 
 def _classify(rel: str) -> tuple[str, str, str]:
     """Return (phase, tool, kind) for a path relative to the target outdir."""
     posix = rel.replace("\\", "/")
     name = Path(posix).name
+    if name.endswith(".txt.prev"):
+        base = name[: -len(".prev")]
+        return MERGED_PHASE.get(base, "other"), "prev", "diff"
     if posix.startswith("tools/"):
         parts = posix.split("/")
         stage = parts[1] if len(parts) > 1 else "other"
         tool = Path(name).stem
         return stage, tool, "tool"
+    if posix.startswith("reviews/"):
+        return "review", Path(name).stem, "review"
     if posix.startswith("proofs/") or "/proofs/" in posix:
         return "prove", Path(name).stem, "proof"
     if "screenshot" in posix.lower():
@@ -217,3 +227,119 @@ def read_output_file(target: str, rel: str, max_chars: int = 200_000) -> dict[st
     out["content"] = text[:max_chars]
     out["truncated"] = len(text) > max_chars
     return out
+
+
+def _line_key(line: str, filename: str) -> str:
+    text = line.strip()
+    if filename == "alive.txt":
+        return text.split()[0] if text else ""
+    return text
+
+
+def diff_host_file(target: str, filename: str) -> dict[str, Any]:
+    """New and gone hosts/URLs versus the previous run's copy of one merge file."""
+    name = Path(str(filename or "")).name
+    if name not in HOST_DIFF_FILES:
+        return {
+            "ok": False,
+            "error": "file must be subdomains.txt, alive.txt, or urls.txt",
+        }
+    full, err = resolve_output_path(target, name)
+    if err or full is None:
+        return {"ok": False, "error": err or "file not found", "file": name}
+    prev = full.with_name(name + ".prev")
+    if not prev.is_file():
+        return {
+            "ok": True,
+            "target": target,
+            "file": name,
+            "has_prev": False,
+            "new_count": 0,
+            "gone_count": 0,
+            "new": [],
+            "gone": [],
+            "truncated": False,
+        }
+
+    def load(path: Path) -> set[str]:
+        if not path.is_file():
+            return set()
+        keys: set[str] = set()
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i > 500_000:
+                    break
+                key = _line_key(line, name)
+                if key:
+                    keys.add(key)
+        return keys
+
+    old = load(prev)
+    new = load(full)
+    added = sorted(new - old)
+    gone = sorted(old - new)
+    return {
+        "ok": True,
+        "target": target,
+        "file": name,
+        "has_prev": prev.is_file(),
+        "new_count": len(added),
+        "gone_count": len(gone),
+        "new": added[:300],
+        "gone": gone[:300],
+        "truncated": len(added) > 300 or len(gone) > 300,
+    }
+
+
+def search_output(target: str, query: str, limit: int = 80) -> dict[str, Any]:
+    """Literal, case-insensitive search across this target's text files."""
+    q = (query or "").strip()
+    if len(q) < 2 or len(q) > 200:
+        return {"ok": False, "error": "query must be 2-200 characters", "hits": []}
+    tdir, err = _target_dir(target)
+    if err or tdir is None or not tdir.is_dir():
+        return {"ok": False, "error": err or "target not found", "hits": []}
+    needle = q.lower()
+    hits: list[dict[str, Any]] = []
+    scanned = 0
+    for path in sorted(tdir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name.startswith(".") or path.name in SKIP_NAMES:
+            continue
+        searchable = path.suffix.lower() in {".txt", ".json", ".jsonl", ".md", ".log"}
+        if path.name.endswith(".txt.prev"):
+            searchable = True
+        if not searchable:
+            continue
+        try:
+            if path.stat().st_size > 8_000_000:
+                continue
+        except Exception:
+            continue
+        scanned += 1
+        if scanned > 400:
+            break
+        rel = str(path.relative_to(tdir)).replace("\\", "/")
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    if i > 20_000:
+                        break
+                    if needle in line.lower():
+                        hits.append({
+                            "path": rel,
+                            "line": i,
+                            "text": line.strip()[:240],
+                        })
+                        if len(hits) >= limit:
+                            return {
+                                "ok": True,
+                                "target": target,
+                                "q": q,
+                                "hits": hits,
+                                "truncated": True,
+                            }
+        except Exception:
+            continue
+    return {"ok": True, "target": target, "q": q, "hits": hits, "truncated": False}

@@ -30,7 +30,10 @@ API (JSON):
   GET  /api/run                  # scan control status
   POST /api/reindex
   GET  /api/file?target=&path=   # JSON preview; too_large files include raw_url
+  GET  /api/search?target=&q=    # literal search inside that target's text files
+  GET  /api/diff?target=&file=   # host diff: subdomains.txt, alive.txt, urls.txt
   GET  /raw/<target>/<path>      # GitHub-style text/plain (50 MB cap)
+  POST /api/prompt               # JSON, or text/event-stream when stream=true
   GET  /api/inbox                # hunter C1+ triage queue
 """
 
@@ -194,6 +197,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         st, body, ct = _json_bytes(obj, status)
         self._send(st, body, ct)
 
+    def _stream_sse(self, events) -> None:
+        """Write prompt tokens as they arrive. Each event is one JSON object."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            for event in events:
+                payload = json.dumps(event, ensure_ascii=False).encode("utf-8")
+                self.wfile.write(b"data: " + payload + b"\n\n")
+                self.wfile.flush()
+        except Exception as e:
+            try:
+                err = json.dumps({"error": f"{type(e).__name__}: {e}"}).encode("utf-8")
+                self.wfile.write(b"data: " + err + b"\n\n")
+                self.wfile.flush()
+            except Exception:
+                pass
+
     def _send_raw(self, path: str) -> None:
         """GitHub-style raw file: GET /raw/<target>/<relative-path> as text/plain."""
         rest = path[len("/raw/"):].lstrip("/")
@@ -307,11 +331,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except Exception:
                 self._send_json({"ok": False, "error": "invalid JSON"}, 400)
                 return
-            from dashboard.prompt import run_prompt
+            from dashboard.prompt import iter_prompt_events, run_prompt
+            prompt = str(obj.get("prompt") or "")
+            target = str(obj.get("target") or "")
+            path = str(obj.get("path") or "")
+            phase = str(obj.get("phase") or "")
+            if obj.get("stream"):
+                self._stream_sse(iter_prompt_events(
+                    prompt=prompt, target=target, path=path, phase=phase,
+                ))
+                return
             self._send_json(run_prompt(
-                prompt=str(obj.get("prompt") or ""),
-                target=str(obj.get("target") or ""),
-                path=str(obj.get("path") or ""),
+                prompt=prompt, target=target, path=path, phase=phase,
             ))
             return
 
@@ -458,12 +489,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/diff":
-            from findings.history import diff_target
             target = q("target")
             if not target:
                 self._send_json({"error": "target required"}, 400)
                 return
+            filename = q("file")
+            if filename:
+                from dashboard.outputs import diff_host_file
+                self._send_json(diff_host_file(target, filename))
+                return
+            from findings.history import diff_target
             self._send_json(diff_target(target))
+            return
+
+        if path == "/api/search":
+            target = q("target")
+            query = q("q")
+            if not target:
+                self._send_json({"error": "target required"}, 400)
+                return
+            from dashboard.outputs import search_output
+            try:
+                limit = int(q("limit") or "80")
+            except ValueError:
+                limit = 80
+            self._send_json(search_output(target, query, limit=max(1, min(limit, 200))))
             return
 
         if path == "/api/overview":

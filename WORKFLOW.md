@@ -330,7 +330,8 @@ python reconkit.py run --target example.com
 ```
 
 `--resume` skips stages whose primary output already exists. `--scope-all`
-runs every root in `~/.reconkit/scope.txt`. Session cookies are sent on httpx
+runs every root in `~/.reconkit/scope.txt`. `--review` adds a model note per
+phase under `reviews/`. Session cookies are sent on httpx
 and prove requests. Full hunter extras: **[HUNTER.md](HUNTER.md)**.
 
 ### G.7 Where results land
@@ -338,6 +339,7 @@ and prove requests. Full hunter extras: **[HUNTER.md](HUNTER.md)**.
 ```text
 ~/.reconkit/output/example.com/
   subdomains.txt, alive.txt, urls.txt, ...
+  reviews/         # phase notes when the run used --review
   proofs/          # after prove
 ```
 

@@ -74,7 +74,7 @@ _SUBCOMMAND_MAP: dict[str, list[str]] = {
 
 # Flags (first token). Value catalogs: shell/suggestions.py
 _FLAG_MAP: dict[str, list[str]] = {
-    "run": ["--modules a,b,c|all", "--bg", "--fg", "--resume", "--force", "--scope-all"],
+    "run": ["--modules a,b,c|all", "--bg", "--fg", "--resume", "--force", "--review", "--supervisor", "--scope-all"],
     "session": ["--cookie", "--cookie-b", "--header", "--header-b"],
     "evidence": ["--id"],
     "agent": ["--dry-run", "--approve", "--modules a,b", "--max-steps N", "--skip-analyst"],
@@ -498,10 +498,11 @@ COMMANDS: list[Command] = [
     ),
     Command(
         "run", ["recon", "pipeline"],
-        "/run [target] [--modules a,b,c|all] [--fg] [--resume] [--scope-all]",
+        "/run [target] [--modules a,b,c|all] [--fg] [--resume] [--review] [--scope-all]",
         "Run recon pipeline (background by default — use /pause /stop)",
         _ht(
-            "Direct reconkit pipeline (no LLM). Detection only.",
+            "Direct reconkit pipeline. Detection only.",
+            "Add --review for a model note after each phase (reviews/<phase>.txt).",
             "Target must already be in /scope (unless --scope-all).",
             "",
             "Runs in BACKGROUND by default so you can:",
@@ -516,17 +517,19 @@ COMMANDS: list[Command] = [
             "  --fg             block the shell (foreground; Ctrl+C only)",
             "  --resume         skip stages whose output already exists",
             "  --force          re-run even if output exists (overrides --resume)",
+            "  --review         model note per phase (alias --supervisor)",
             "  --scope-all      run against every root in ~/.reconkit/scope.txt",
             "",
             "Examples:",
             "  /run example.com",
             "  /run example.com --modules subdomains,dns,httpprobe",
             "  /run example.com --resume",
+            "  /run example.com --review",
             "  /run --scope-all --modules subdomains,dns,httpprobe",
             "  /run example.com --fg",
             "",
             "Related: /quick  /full  /scan  /pause  /stop  /verbose  /session",
-            "CLI: python reconkit.py run --target T [--modules …] [--resume] [--scope-all]",
+            "CLI: python reconkit.py run --target T [--modules …] [--resume] [--review] [--scope-all]",
         ),
         "recon", "cmd_run",
     ),

@@ -1153,6 +1153,26 @@ body.lite { background: var(--bg); }
   font-family: var(--mono);
   font-size: 13px;
 }
+.tape {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  white-space: pre-wrap;
+}
+.tape .live {
+  color: var(--accent);
+}
+#fileBody tr.writing td:first-child {
+  color: var(--accent);
+}
+.search-hit {
+  cursor: pointer;
+  display: block;
+  padding: 2px 0;
+}
+.search-hit:hover { color: var(--text); }
 @media (max-width: 1000px) {
   .output-split { grid-template-columns: 1fr; }
 }

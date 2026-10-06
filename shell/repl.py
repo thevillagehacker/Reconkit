@@ -1031,14 +1031,15 @@ class ReconShell:
         if len(files) > 40:
             print(f"    … +{len(files) - 40} more")
 
-    def _parse_run_args(self, args: list[str]) -> tuple[str | None, str, bool, bool, bool, bool]:
-        """Return (target, modules_csv, background, resume, force, scope_all)."""
+    def _parse_run_args(self, args: list[str]) -> tuple[str | None, str, bool, bool, bool, bool, bool]:
+        """Return (target, modules_csv, background, resume, force, scope_all, review)."""
         target: str | None = None
         modules = "all"
         background = False
         resume = False
         force = False
         scope_all = False
+        review = False
         i = 0
         while i < len(args):
             a = args[i]
@@ -1054,12 +1055,19 @@ class ReconShell:
                 background = True
                 i += 1
                 continue
+            if a in ("--fg", "--foreground"):
+                i += 1
+                continue
             if a in ("--resume",):
                 resume = True
                 i += 1
                 continue
             if a in ("--force",):
                 force = True
+                i += 1
+                continue
+            if a in ("--review", "--supervisor"):
+                review = True
                 i += 1
                 continue
             if a in ("--scope-all", "--scope_all"):
@@ -1075,7 +1083,7 @@ class ReconShell:
             i += 1
         if target is None:
             target = self.target or None
-        return target, modules, background, resume, force, scope_all
+        return target, modules, background, resume, force, scope_all, review
 
     def _start_run_job(
         self,
@@ -1087,6 +1095,7 @@ class ReconShell:
         resume: bool = False,
         force: bool = False,
         scope_all: bool = False,
+        review: bool = False,
     ) -> None:
         """
         Start a recon run (shared by /run /quick /full /scan /playbook).
@@ -1102,6 +1111,7 @@ class ReconShell:
             resume=resume,
             force=force,
             scope_all=scope_all,
+            review=review,
         )
 
         # Eager live tracker seed (before job thread starts) so the UI flips immediately
@@ -1143,9 +1153,9 @@ class ReconShell:
         print("  tip:       /outdir " + target + "  ·  /dashboard for live phase tiles")
 
     def cmd_run(self, args: list[str]) -> None:
-        target, modules, background, resume, force, scope_all = self._parse_run_args(args)
+        target, modules, background, resume, force, scope_all, review = self._parse_run_args(args)
         if not target and not scope_all:
-            rk.fail("usage: /run [target] [--modules a,b,c|all] [--bg|--fg] [--resume] [--scope-all]")
+            rk.fail("usage: /run [target] [--modules a,b,c|all] [--bg|--fg] [--resume] [--review] [--scope-all]")
             return
         # --bg is default now; --fg forces foreground
         force_fg = any(a in ("--fg", "--foreground") for a in args)
@@ -1158,6 +1168,7 @@ class ReconShell:
             resume=resume,
             force=force,
             scope_all=scope_all,
+            review=review,
         )
 
     def cmd_quick(self, args: list[str]) -> None:

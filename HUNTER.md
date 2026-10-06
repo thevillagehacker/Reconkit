@@ -159,8 +159,22 @@ tools/subdomains/subfinder.txt
 subdomains.txt          # already has subfinder names
 ```
 
-Amass is last and capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). Kill a hung
-scan with `/stop`.
+Amass is last and capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). dnsx, httpx,
+tlsx, crawl, and each nuclei pack have their own caps (`RECON_DNSX_TIMEOUT`,
+`RECON_HTTPX_TIMEOUT`, `RECON_TLSX_TIMEOUT`, `RECON_CRAWL_TIMEOUT`,
+`RECON_NUCLEI_TIMEOUT`). A cap keeps the partial file and moves on. The same
+files grow while the tool is still printing. Kill a hung scan with `/stop`.
+
+`--resume` skips a finished tool file. `run_meta.json` records the run.
+`tech_routes.txt` lists `/prove` techniques that match files already on disk.
+`param_priority.txt` is a short parameter list. `tools/<stage>/dropped.txt`
+records out-of-scope and wildcard drops (capped).
+
+`reviews/<phase>.txt` is an opt-in model note (`--review` or `RECON_SUPERVISOR=1`).
+The scan still chooses every module. The note says what landed, what to ignore,
+and which existing `/prove` technique is worth a look. `reviews/summary.txt`
+is written at the end of a run that was not stopped. The dashboard lists these
+under the `review` phase.
 
 Under `~/.reconkit/output/<target>/`:
 

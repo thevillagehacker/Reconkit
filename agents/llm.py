@@ -584,6 +584,120 @@ class LLMClient:
             f"  4. python recon_agents.py providers   # list presets\n"
         )
 
+    def chat_stream(self, messages: list[dict[str, str]], *, temperature: float | None = None):
+        """Yield text deltas. A provider without a stream yields one full reply."""
+        temp = self.config.temperature if temperature is None else temperature
+        provider = self.config.provider
+        preset = provider_preset(provider)
+        api = preset.get("api", "openai")
+        got = False
+        try:
+            if provider == "ollama" and not self.config.use_openai_compat:
+                if not self.config.base_url.rstrip("/").endswith("/v1"):
+                    for delta in self._stream_ollama(messages, temp):
+                        got = True
+                        yield delta
+                    if got:
+                        return
+            elif api == "anthropic" or provider in ("anthropic", "claude"):
+                # One chunk keeps Claude on the same code path as chat().
+                text = self._anthropic(messages, temp, False)
+                if text:
+                    yield strip_thinking(text)
+                return
+            else:
+                for delta in self._stream_openai(messages, temp):
+                    got = True
+                    yield delta
+                if got:
+                    return
+        except Exception:
+            if got:
+                raise
+        text = self.chat(messages, temperature=temperature)
+        if text:
+            yield text
+
+    def _stream_ollama(self, messages: list[dict[str, str]], temperature: float):
+        url = f"{self.config.base_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "stream": True,
+            "options": {"temperature": temperature},
+        }
+        yield from self._iter_stream(url, payload, headers={}, ndjson=True)
+
+    def _stream_openai(self, messages: list[dict[str, str]], temperature: float):
+        base = self.config.base_url.rstrip("/")
+        if self.config.provider == "ollama" and not base.endswith("/v1"):
+            base = base + "/v1"
+        url = f"{base}/chat/completions"
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        headers = {}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        if self.config.provider == "openrouter":
+            headers.setdefault("HTTP-Referer", "https://github.com/thevillagehacker/Bug_Bounty")
+            headers.setdefault("X-Title", "reconkit-agents")
+        yield from self._iter_stream(url, payload, headers=headers, ndjson=False)
+
+    def _iter_stream(self, url: str, payload: dict, headers: dict, ndjson: bool):
+        body = json.dumps(payload).encode("utf-8")
+        req_headers = {"Content-Type": "application/json", **headers}
+        req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self.config.timeout)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            raise LLMError(f"LLM HTTP {e.code} from {url}: {err_body[:800] or e.reason}") from e
+        except urllib.error.URLError as e:
+            raise LLMError(self._reachability_hint(url, e.reason)) from e
+        except TimeoutError as e:
+            raise LLMError(
+                f"LLM request timed out after {self.config.timeout}s → {url}."
+            ) from e
+        try:
+            for raw in resp:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                data = line
+                if not ndjson:
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("done") is True and ndjson:
+                    content = (obj.get("message") or {}).get("content") or ""
+                    if content:
+                        yield content
+                    break
+                choices = obj.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    delta = (choices[0].get("delta") or {}).get("content")
+                    if isinstance(delta, str) and delta:
+                        yield delta
+                    continue
+                content = (obj.get("message") or {}).get("content")
+                if isinstance(content, str) and content:
+                    yield content
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
     def chat_json(
         self,
         messages: list[dict[str, str]],

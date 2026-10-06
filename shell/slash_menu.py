@@ -279,7 +279,7 @@ def _finalize_pick(it: SlashItem, *, c: Callable, Colors: type) -> str:
         "/jobs status": "job-id",
         "/config set": "--base-url URL  (or other --flags)",
         "/config init": "--repo --base-url URL --model TAG",
-        "/run": "[target] [--modules a,b] [--bg] [--resume] [--scope-all]",
+        "/run": "[target] [--modules a,b] [--bg] [--resume] [--review] [--scope-all]",
         "/session": "[show|set|clear] [--cookie …]",
         "/har": "import <file.har> [target]",
         "/evidence": "[target] [--id ID]",

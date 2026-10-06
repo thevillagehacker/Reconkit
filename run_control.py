@@ -325,6 +325,7 @@ def run_interruptible(
     check: bool = False,
     poll: float = 0.25,
     timeout: float | None = None,
+    on_stdout=None,
 ) -> subprocess.CompletedProcess:
     """
     Run a tool with pause/stop awareness. /stop and Ctrl+C kill the process group.
@@ -374,7 +375,7 @@ def run_interruptible(
         except Exception:
             pass
 
-    def _pump(stream, sink: list[bytes]) -> None:
+    def _pump(stream, sink: list[bytes], is_stdout: bool = False) -> None:
         if stream is None:
             return
         try:
@@ -383,6 +384,11 @@ def run_interruptible(
                 if not chunk:
                     break
                 sink.append(chunk)
+                if is_stdout and on_stdout is not None:
+                    try:
+                        on_stdout(chunk)
+                    except Exception:
+                        pass
         except Exception:
             pass
         finally:
@@ -394,11 +400,15 @@ def run_interruptible(
     try:
         if do_capture:
             if proc.stdout is not None:
-                t = threading.Thread(target=_pump, args=(proc.stdout, stdout_chunks), daemon=True)
+                t = threading.Thread(
+                    target=_pump, args=(proc.stdout, stdout_chunks, True), daemon=True
+                )
                 t.start()
                 pumps.append(t)
             if proc.stderr is not None:
-                t = threading.Thread(target=_pump, args=(proc.stderr, stderr_chunks), daemon=True)
+                t = threading.Thread(
+                    target=_pump, args=(proc.stderr, stderr_chunks, False), daemon=True
+                )
                 t.start()
                 pumps.append(t)
 

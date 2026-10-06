@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Orbitron:wght@500;600;700;800;900&family=Oxanium:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=3.22-fix" />
+  <link rel="stylesheet" href="/app.css?v=3.23-tier" />
 </head>
 <body class="dash lite">
   <header class="dash-header">
@@ -58,9 +58,15 @@
             <label class="grow">Search
               <input id="fltFileQ" type="search" placeholder="filename…" />
             </label>
+            <label class="grow">In files
+              <input id="fltContentQ" type="search" placeholder="host or path…" />
+            </label>
             <button type="button" id="btnOutputApply" class="btn primary">Filter</button>
+            <button type="button" id="btnContentSearch" class="btn ghost">Search</button>
+            <button type="button" id="btnDiffFile" class="btn ghost">Diff hosts</button>
             <button type="button" id="btnAskFile" class="btn ghost">Ask about this file</button>
           </div>
+          <div id="liveTape" class="tape">Live tool files show up here while a scan is writing.</div>
         </div>
         <div class="output-split">
           <div class="panel">
@@ -90,12 +96,15 @@
             <span class="chip" id="llmChip">LLM not loaded</span>
           </div>
           <p class="mission-lede">
-            Uses <code>config/agent_config.json</code> (Ollama or cloud). Optional: attach the file open in OUTPUT.
+            Uses <code>config/agent_config.json</code> (Ollama or cloud). Attach the open file, or every file in the selected phase.
           </p>
           <textarea id="promptText" rows="6" placeholder="Ask about this target’s recon files…"></textarea>
           <div class="filters" style="margin-top:8px">
             <label class="inline">
               <input type="checkbox" id="chkAttach" checked /> attach current file
+            </label>
+            <label class="inline">
+              <input type="checkbox" id="chkPhase" /> attach this phase
             </label>
             <button type="button" id="btnSendPrompt" class="btn primary">Send</button>
           </div>
@@ -111,6 +120,6 @@
     <span>v3.0.0 · reconkit</span>
   </footer>
 
-  <script src="/app.js?v=3.22-fix"></script>
+  <script src="/app.js?v=3.23-tier"></script>
 </body>
 </html>

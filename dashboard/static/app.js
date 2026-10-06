@@ -11,6 +11,7 @@ const state = {
   fileContent: "",
   pollTimer: null,
   fingerprint: "",
+  prevSizes: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -178,16 +179,56 @@ function renderFileList() {
     return true;
   });
   $("fileCount").textContent = String(rows.length);
-  $("fileBody").innerHTML = rows.map((f) => `
-    <tr data-path="${esc(f.path)}" class="${f.path === state.filePath ? "active" : ""}">
+  const now = Date.now() / 1000;
+  $("fileBody").innerHTML = rows.map((f) => {
+    const prev = state.prevSizes[f.path];
+    const writing = prev != null && Number(f.size) > Number(prev);
+    const fresh = now - Number(f.mtime || 0) < 20;
+    const cls = [
+      f.path === state.filePath ? "active" : "",
+      writing || fresh ? "writing" : "",
+    ].filter(Boolean).join(" ");
+    return `
+    <tr data-path="${esc(f.path)}" class="${cls}">
       <td>${esc(f.phase)}</td>
       <td>${esc(f.tool)}</td>
       <td>${esc(f.path)}</td>
       <td>${Number(f.lines) > 0 ? esc(f.lines) : esc(fmtBytes(f.size))}</td>
-    </tr>
-  `).join("") || `<tr><td colspan="4" class="muted">No files yet — run a scan</td></tr>`;
+    </tr>`;
+  }).join("") || `<tr><td colspan="4" class="muted">No files yet — run a scan</td></tr>`;
+  renderTape(now);
+  const next = {};
+  for (const f of state.files || []) next[f.path] = f.size;
+  state.prevSizes = next;
   $("fileBody").querySelectorAll("tr[data-path]").forEach((tr) => {
     tr.onclick = () => openFile(tr.dataset.path);
+  });
+}
+
+function renderTape(now) {
+  const el = $("liveTape");
+  if (!el) return;
+  const rows = (state.files || [])
+    .filter((f) => {
+      const p = String(f.path || "");
+      return p.startsWith("tools/") || p.endsWith(".txt") || p.startsWith("nuclei_");
+    })
+    .filter((f) => now - Number(f.mtime || 0) < 120)
+    .sort((a, b) => Number(b.mtime) - Number(a.mtime))
+    .slice(0, 8);
+  if (!rows.length) {
+    el.textContent = "Live tool files show up here while a scan is writing.";
+    return;
+  }
+  el.textContent = "";
+  rows.forEach((f) => {
+    const prev = state.prevSizes[f.path];
+    const writing = prev != null && Number(f.size) > Number(prev);
+    const line = document.createElement("div");
+    line.className = writing ? "live" : "";
+    const age = Math.max(0, Math.round(now - Number(f.mtime || now)));
+    line.textContent = `${writing ? "writing" : "wrote"}  ${f.path}  ${fmtBytes(f.size)}  ${age}s ago`;
+    el.appendChild(line);
   });
 }
 
@@ -239,40 +280,151 @@ async function loadLlm() {
   }
 }
 
+function filePhase() {
+  const hit = (state.files || []).find((f) => f.path === state.filePath);
+  return (hit && hit.phase) || state.phase || "";
+}
+
 async function sendPrompt() {
   const prompt = ($("promptText").value || "").trim();
   if (!prompt) {
     $("promptReply").textContent = "Type a prompt first.";
     return;
   }
-  const attach = $("chkAttach") && $("chkAttach").checked;
+  const usePhase = $("chkPhase") && $("chkPhase").checked;
+  const attach = $("chkAttach") && $("chkAttach").checked && !usePhase;
+  const phase = usePhase ? filePhase() : "";
+  if (usePhase && (!state.target || !phase)) {
+    $("promptReply").textContent = "Select a phase filter, or open a file, so the phase is known.";
+    return;
+  }
   if (attach && (!state.target || !state.filePath)) {
     $("promptReply").textContent = "Open a file in OUTPUT first, or uncheck attach.";
     return;
   }
-  $("promptReply").textContent = "…";
+  $("promptReply").textContent = "";
   $("btnSendPrompt").disabled = true;
   try {
-    const data = await api("/api/prompt", {
+    const res = await fetch("/api/prompt", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({
         prompt,
+        stream: true,
         target: state.target || "",
         path: attach ? (state.filePath || "") : "",
+        phase: phase || "",
       }),
     });
-    if (!data.ok) {
-      $("promptReply").textContent = data.error || "request failed";
+    const ctype = res.headers.get("content-type") || "";
+    if (!ctype.includes("text/event-stream")) {
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      $("promptReply").textContent = data.error || data.reply || "request failed";
       return;
     }
-    $("llmChip").textContent = `${data.provider || "?"} · ${data.model || "?"}`;
-    $("promptReply").textContent = data.reply || "(empty reply)";
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    if (!reader) {
+      $("promptReply").textContent = await res.text();
+      return;
+    }
+    const decoder = new TextDecoder();
+    let buf = "";
+    let reply = "";
+    while (true) {
+      const step = await reader.read();
+      if (step.done) break;
+      buf += decoder.decode(step.value, { stream: true });
+      const chunks = buf.split("\n\n");
+      buf = chunks.pop() || "";
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((ln) => ln.startsWith("data:"));
+        if (!line) continue;
+        let ev;
+        try {
+          ev = JSON.parse(line.slice(5).trim());
+        } catch (_) {
+          continue;
+        }
+        if (ev.error) {
+          $("promptReply").textContent = (reply ? reply + "\n\n" : "") + ev.error;
+          return;
+        }
+        if (ev.meta) {
+          $("llmChip").textContent = `${ev.meta.provider || "?"} · ${ev.meta.model || "?"}`;
+        }
+        if (ev.delta) {
+          reply += ev.delta;
+          $("promptReply").textContent = reply;
+        }
+      }
+    }
+    if (!reply) $("promptReply").textContent = "(empty reply)";
   } catch (e) {
     $("promptReply").textContent = String(e.message || e);
   } finally {
     $("btnSendPrompt").disabled = false;
   }
+}
+
+async function searchContent() {
+  const q = ($("fltContentQ").value || "").trim();
+  if (!state.target) {
+    $("filePreview").textContent = "Select a target first.";
+    return;
+  }
+  if (q.length < 2) {
+    $("filePreview").textContent = "Type at least 2 characters to search inside files.";
+    return;
+  }
+  const data = await api(
+    `/api/search?target=${encodeURIComponent(state.target)}&q=${encodeURIComponent(q)}`
+  );
+  const pre = $("filePreview");
+  pre.textContent = "";
+  const hits = data.hits || [];
+  if (!hits.length) {
+    pre.textContent = data.error || `No lines contain “${q}”.`;
+    return;
+  }
+  pre.appendChild(document.createTextNode(
+    `${hits.length} hit(s)${data.truncated ? " (capped)" : ""}\n\n`
+  ));
+  hits.forEach((h) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "search-hit";
+    btn.textContent = `${h.path}:${h.line}  ${h.text}`;
+    btn.onclick = () => openFile(h.path);
+    pre.appendChild(btn);
+    pre.appendChild(document.createTextNode("\n"));
+  });
+}
+
+async function diffOpenFile() {
+  if (!state.target || !state.filePath) {
+    $("filePreview").textContent = "Open subdomains.txt, alive.txt, or urls.txt first.";
+    return;
+  }
+  const name = state.filePath.split("/").pop();
+  const data = await api(
+    `/api/diff?target=${encodeURIComponent(state.target)}&file=${encodeURIComponent(name)}`
+  );
+  if (!data.ok) {
+    $("filePreview").textContent = data.error || "diff failed";
+    return;
+  }
+  const lines = [
+    `${name}: ${data.new_count} new, ${data.gone_count} gone`,
+    data.has_prev ? "compared with the previous run" : "no previous run saved yet — run the stage again to build a diff",
+    "",
+    "# new",
+    ...(data.new || []),
+    "",
+    "# gone",
+    ...(data.gone || []),
+  ];
+  $("filePreview").textContent = lines.join("\n");
 }
 
 async function pollStatus() {
@@ -327,6 +479,20 @@ function wire() {
   $("fltPhase").onchange = applyFileFilters;
   $("fltTool").onchange = applyFileFilters;
   $("fltFileQ").oninput = applyFileFilters;
+  $("btnContentSearch").onclick = () => searchContent().catch((e) => {
+    $("filePreview").textContent = String(e.message || e);
+  });
+  $("fltContentQ").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      searchContent().catch((e) => {
+        $("filePreview").textContent = String(e.message || e);
+      });
+    }
+  });
+  $("btnDiffFile").onclick = () => diffOpenFile().catch((e) => {
+    $("filePreview").textContent = String(e.message || e);
+  });
   $("btnAskFile").onclick = () => {
     if (!state.filePath) {
       alert("Open a file in OUTPUT first.");
