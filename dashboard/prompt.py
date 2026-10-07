@@ -90,9 +90,12 @@ def _attach(target: str, path: str, phase: str) -> tuple[str, dict[str, Any], st
 
 def _messages(prompt: str, attached: str, meta: dict[str, Any]) -> list[dict[str, str]]:
     system = (
-        "You are a recon assistant for authorized bug-bounty / VDP work. "
-        "Use only the attached reconkit output files. Detection and triage only — "
-        "no exploits, shells, dumps, or out-of-scope advice."
+        "You answer from the attached reconkit output for one authorized target. "
+        "Quote counts and hosts that appear in the attachment. "
+        "If the attachment does not contain the answer, say it is not in the file. "
+        "Detection and triage only. Do not give exploit steps, shells, dumps, "
+        "sqlmap usage, or out-of-scope targets. Do not start a scan. "
+        "When asked what to do next, name one module the files already support, or none."
     )
     user = prompt
     if attached:

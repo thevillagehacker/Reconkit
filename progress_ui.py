@@ -918,12 +918,26 @@ class ToolChecklist:
             self.stop(level="OK")
 
 
+_CHECKLIST_TLS = threading.local()
+
+
+def suppress_checklist(on: bool) -> None:
+    """This thread skips the shared tool HUD.
+
+    Overlapping phases each used to install a checklist and stop the other
+    one's spinner. The work still runs; the phase banner stays on the main HUD.
+    """
+    _CHECKLIST_TLS.quiet = bool(on)
+
+
 def tool_checklist(
     tools: list[str],
     *,
     title: str = "Tools",
     verbose: int = 1,
 ) -> ToolChecklist:
+    if getattr(_CHECKLIST_TLS, "quiet", False):
+        verbose = -1
     cl = ToolChecklist(tools, title=title, verbose=verbose)
     cl.start()
     return cl

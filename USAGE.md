@@ -317,8 +317,8 @@ python reconkit.py modules
 | Module | What it does |
 |--------|----------------|
 | `subdomains` | subfinder, amass, assetfinder, chaos, findomain, crt.sh, Wayback, HackerTarget -> merge/dedupe |
-| `permute` | Capped DNS permutations (alterx/dnsgen) then dnsx |
-| `dns` | dnsx multi-record + CNAME takeover fingerprint candidates |
+| `permute` | Capped DNS permutations (alterx/dnsgen). dnsx here only when `dns` is not in the same run |
+| `dns` | One dnsx pass: resolved hosts, records, CNAME takeover candidates |
 | `ports` | In-scope naabu connect-scan of common web/data ports + httpx |
 | `httpprobe` | httpx alive hosts, title, status, tech (session headers; WAF -> stealth) |
 | `tls` | tlsx cert details, expiry/self-signed/mismatch, JARM |
@@ -328,7 +328,7 @@ python reconkit.py modules
 | `jsintel` | sourcemaps, hidden routes, API paths, JS library versions, GitHub URLs |
 | `params` | unfurl param names + arjun hidden params |
 | `apis` | `/api/` `/graphql` `/swagger` harvest + IDOR-shaped parameter URLs |
-| `content` | sensitive paths + ffuf directory fuzz |
+| `content` | one httpx sensitive-path pass + ffuf directory fuzz |
 | `bypass403` | header/path 401/403 probes (**no** password spray) |
 | `gfextra` | gf redirect / lfi / interestingparams candidate lists |
 | `xss` | gf xss -> kxss -> dalfox (**detection** of candidates) |
@@ -347,8 +347,8 @@ python reconkit.py modules
 **Dependency order (logical):**
 
 ```
-subdomains -> permute -> dns / ports / httpprobe -> tls, wellknown, crawl, content, nuclei, screenshots
-crawl -> js -> jsintel, params, apis, gfextra, xss, sqli, ssrf_ssti, redirect, cors, graphql, cloud, takeover_plus, gitrecon
+subdomains -> permute -> dns -> httpprobe -> tls, wellknown, ports, crawl (together, then join)
+-> js -> jsintel, params, apis, content, gfextra, xss, sqli, ssrf_ssti, redirect, nuclei, screenshots
 ```
 
 Hunter extras walkthrough: **[HUNTER.md](HUNTER.md)**.
@@ -384,13 +384,13 @@ Each tool also writes as soon as it finishes:
 ~/.reconkit/output/example.com/tools/crawl/katana.txt
 ```
 
-The merged `subdomains.txt` / `urls.txt` are updated after **every** tool (you do not wait for amass). While a tool is still running, `tools/<stage>/<tool>.txt` grows as stdout arrives. Amass is last and killed after 180s (`RECON_AMASS_TIMEOUT`). Other long tools have their own caps (partial output is kept, the next tool still runs):
+The merged `subdomains.txt` / `urls.txt` are updated as each tool finishes. Passive name sources run together, and amass keeps its own 180s cap (`RECON_AMASS_TIMEOUT`). While a tool is still running, `tools/<stage>/<tool>.txt` grows as stdout arrives. Other long tools have their own caps (partial output is kept, the next tool still runs):
 
 ```
 RECON_SUBDOMAIN_TIMEOUT   180s   subfinder, assetfinder, findomain, chaos
 RECON_DNSX_TIMEOUT        300s   dnsx
-RECON_HTTPX_TIMEOUT       600s   the main httpx probe
-RECON_HTTPX_HOST_TIMEOUT   60s   one host (sensitive paths, wildcard check)
+RECON_HTTPX_TIMEOUT       600s   the main httpx probe and the sensitive-path batch
+RECON_HTTPX_HOST_TIMEOUT   60s   wildcard HTTP check
 RECON_TLSX_TIMEOUT        300s   tlsx
 RECON_CRAWL_TIMEOUT       600s   katana, gau, waybackurls
 RECON_CRAWL_HOST_TIMEOUT   90s   gospider / hakrawler, per host
@@ -893,6 +893,7 @@ Gemini, OpenAI, ...). **Skills** inject methodology by role + vuln surface.
 | `analyst` | final `agent_report.md` |
 
 If the LLM is down, **heuristics** still advance the pipeline.
+The planner sees file counts, a skip list when `alive.txt` or `urls.txt` is empty, and a few head lines. It does not receive module descriptions or full file bodies. `/run` does not ask the model which module to run.
 
 ### Providers (list)
 

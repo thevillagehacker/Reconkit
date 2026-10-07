@@ -306,12 +306,14 @@ def write_summary(
     safe_target = _safe_target(target)
     shown_target = safe_target or "-"
     system = (
-        "You summarize authorized recon phase notes. "
-        "You do not run tools, change scope, or exploit anything. "
+        "You summarize authorized recon phase notes for one target. "
+        "You do not run tools, change scope, start modules, or exploit anything. "
         "Reply with exactly these headings: ## Hunt note, ## Prove next. "
+        "Hunt note: at most 5 lines. Each line is one signal copied from the notes, with its phase file. "
+        "Drop empty phases and repeated counts. "
         "Under Prove next, list only technique ids from this set, one per line, "
         f"or the single word none: {', '.join(allowed)}. "
-        "Keep the hunt note to a few short lines."
+        "Do not write shell commands."
     )
     user = f"Target: {shown_target}\n\n{compiled}"
     messages = [
@@ -403,7 +405,11 @@ def _review_phase(
         return None
     allowed = _allowed_techniques()
     excerpts = _excerpts(samples, dropped_lines, context)
-    head = f"Phase: {phase}\n\n{facts}\n\n"
+    head = (
+        f"Phase: {phase}\n"
+        "Use the lines under the file heads. The Facts counts are final.\n\n"
+        f"{facts}\n\n"
+    )
     user = head + excerpts[: max(0, _MAX_PROMPT - len(head))]
     messages = [
         {"role": "system", "content": _system_prompt(allowed)},
@@ -460,11 +466,15 @@ def _system_prompt(allowed: list[str]) -> str:
     return (
         "You review one phase of an authorized recon scan. "
         "You do not run tools, change scope, start modules, or exploit anything. "
-        "Facts are line counts already computed in code. Repeat those counts as given. "
+        "The Facts counts are already correct. Repeat a count only to point at a file. "
+        "Use only hosts and URLs that appear in the excerpts. "
         "Reply in plain text with exactly these headings: "
         "## Landed, ## Noise, ## Prove next, ## Ignore. "
+        "Landed: one line per host or URL that is new or high-signal, with the file name. "
+        "Noise: empty, wildcard, or scanner-chatter lines. "
         "Under Prove next, list only technique ids from this set, one per line, "
         f"or the single word none: {', '.join(allowed)}. "
+        "Ignore: files that should not drive the next step. "
         "Leave sqlmap, shells, and dumps out of the note. "
         "Keep each section to a few short lines."
     )

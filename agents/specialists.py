@@ -13,8 +13,8 @@ from typing import Any
 
 from .llm import LLMClient
 from .skills import skill_system_block
-from .state import ReconState, build_context_bundle
-from .tools import module_descriptions, run_modules
+from .state import ReconState, analyst_evidence, recon_brief
+from .tools import run_modules
 
 
 @dataclass
@@ -41,35 +41,108 @@ AGENT_MODULES: dict[str, list[str]] = {
 
 AGENT_ROLES: dict[str, str] = {
     "subdomain": (
-        "You are Agent 1 — Subdomain Enumeration specialist for authorized bug bounty recon. "
-        "Your job is passive/active subdomain discovery for the in-scope root domain only. "
-        "You never scan out-of-scope assets. After running, summarize yield and quality."
+        "You summarize subdomain enumeration for one authorized root. "
+        "Counts and names come from the tool files only."
     ),
     "discovery": (
-        "You are the Discovery agent (DNS + HTTP + TLS). You resolve subdomains, probe live "
-        "HTTP(S) hosts, and inspect certificates. Prioritize modules that unblock crawl/vuln work."
+        "You summarize DNS and live HTTP for one authorized target. "
+        "A name with no DNS record is not a live host."
     ),
     "content": (
-        "You are the Content/Surface agent. You crawl live hosts, extract JS secrets/endpoints, "
-        "mine parameters, and do light content discovery. Detection only — no exploitation."
+        "You summarize crawled URLs, JavaScript, and parameters for one authorized target. "
+        "Detection only."
     ),
     "vuln": (
-        "You are the Vulnerability-candidate agent. You run XSS/SQLi/SSRF/SSTI canaries, nuclei, "
-        "and cloud asset checks. Detection and candidates only — never active exploitation tools."
+        "You summarize scanner candidates for one authorized target. "
+        "A candidate is not a confirmed issue. No exploit steps."
     ),
     "visual": (
-        "You are the Visual recon agent. You capture screenshots of live hosts for manual review."
+        "You summarize which live hosts were screenshotted."
     ),
     "planner": (
-        "You are the Recon Orchestrator. Given completed modules and output summaries, decide the "
-        "NEXT agent and modules to run. Prefer high-signal next steps. Never recommend out-of-scope "
-        "scanning or exploitation. Always stay within the authorized target."
+        "You choose the next recon modules for one authorized target from the file counts."
     ),
     "analyst": (
-        "You are the Recon Analyst. Summarize findings for a human bug bounty hunter: interesting "
-        "hosts, takeover candidates, secrets, vuln candidates. Stay factual; do not invent findings."
+        "You write a short recon report from file counts and heads. You do not invent findings."
     ),
 }
+
+_PLANNER_RULES = (
+    "Reply with one JSON object and nothing else:\n"
+    '{"done":false,"next_agent":"discovery","modules":["dns","httpprobe"],'
+    '"reasoning":"at most 40 words","priority":"high"}\n'
+    "next_agent is one of: subdomain, discovery, content, vuln, visual.\n"
+    "modules is 1 to 3 names from runnable, all owned by next_agent.\n"
+    "priority is critical, high, medium, or low.\n"
+    "File counts and heads outrank the default pipeline in the skill text.\n"
+    "Obey skip_if_chosen. Unresolved permute names are not hosts.\n"
+    "Prefer the runnable module that reads a non-empty file the completed modules have not used.\n"
+    "A non-empty cname_takeover_candidates.txt is already a finding: do not pick dns again.\n"
+    "Set done to true when runnable is empty, or when every runnable module is listed in skip_if_chosen.\n"
+    "Do not invent modules, start /prove, widen scope, or mention sqlmap, shells, or dumps."
+)
+
+
+def tool_result_lines(tool_results: list[dict]) -> str:
+    """Module, file, and line count. Previews stay out of the prompt."""
+    rows: list[str] = []
+    for result in tool_results:
+        mod = str(result.get("module") or "?")
+        if result.get("skipped"):
+            rows.append(f"{mod}: skipped")
+            continue
+        if result.get("success") is False:
+            err = str(result.get("error") or "failed")[:140]
+            rows.append(f"{mod}: failed {err}")
+            continue
+        bits: list[str] = []
+        for item in result.get("outputs") or []:
+            path = str(item.get("path") or "?")
+            if not item.get("exists"):
+                bits.append(f"{path}=missing")
+                continue
+            if item.get("empty"):
+                bits.append(f"{path}=0")
+                continue
+            bits.append(f"{path}={item.get('lines', 0)}")
+            keys = item.get("interesting_keywords") or []
+            if keys:
+                bits.append(f"{path} keys={','.join(str(key) for key in keys[:4])}")
+        rows.append(f"{mod}: " + (", ".join(bits) if bits else "no files"))
+    return "\n".join(rows)
+
+
+def planner_user(state: ReconState, runnable: list[str], brief: str | None = None) -> str:
+    owners = "; ".join(
+        f"{agent}={','.join(mods)}" for agent, mods in AGENT_MODULES.items()
+    )
+    if brief is None:
+        brief = recon_brief(state.outdir, runnable)
+    return (
+        f"target: {state.target}\n"
+        f"completed: {', '.join(state.completed_modules) or '-'}\n"
+        f"runnable: {', '.join(runnable) or '-'}\n"
+        f"owners: {owners}\n"
+        f"{brief}"
+        "Choose from runnable. Obey skip_if_chosen.\n"
+    )
+
+
+def planner_messages(state: ReconState, runnable: list[str]) -> list[dict[str, str]]:
+    brief = recon_brief(state.outdir, runnable)
+    skill = skill_system_block(
+        role="planner",
+        max_chars=6500,
+        context=brief[:2500],
+        modules=list(runnable)[:12],
+    )
+    system = AGENT_ROLES["planner"] + "\n\n" + _PLANNER_RULES
+    if skill:
+        system = system + "\n\n" + skill
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": planner_user(state, runnable, brief)},
+    ]
 
 
 class SpecialistAgent:
@@ -133,28 +206,27 @@ class SpecialistAgent:
         *,
         modules: list[str] | None = None,
     ) -> str:
-        ctx = build_context_bundle(state)
-        role = AGENT_ROLES.get(self.name, "You are a recon specialist.")
-        # On-demand vuln mini-skills from modules + output snippets
-        ctx_snip = (ctx or "")[:2500]
-        tr_snip = str(tool_results)[:2000]
+        brief = recon_brief(state.outdir)
+        ran = tool_result_lines(tool_results)
+        role = AGENT_ROLES.get(self.name, "You summarize one authorized recon step from the files.")
         mods = modules if modules is not None else list(self.modules)
         skill = skill_system_block(
             role="specialist",
             max_chars=7000,
-            context=ctx_snip + "\n" + tr_snip,
+            context=(brief + "\n" + ran)[:2500],
             modules=mods,
         )
         if skill:
             role = role + "\n\n" + skill
         user = (
-            f"Target: {state.target}\n"
-            f"Agent: {self.name}\n"
-            f"Tool results:\n{tool_results}\n\n"
-            f"Context bundle (file previews):\n{ctx}\n\n"
-            "Write a concise 4–8 bullet operational summary for the next agent: "
-            "what was found (counts), notable signals, and recommended follow-ups. "
-            "Do not invent data not present in the tool results."
+            f"target: {state.target}\n"
+            f"agent: {self.name}\n"
+            f"just_ran:\n{ran}\n\n"
+            f"{brief}"
+            "Write 4 to 6 bullets. Each bullet is one count or one name copied from just_ran or heads. "
+            "End with one line: next: <module> because <file count>. "
+            "Use next: none when the files are empty. "
+            "Do not invent hosts, secrets, or issues."
         )
         try:
             return self.llm.chat(
@@ -190,8 +262,6 @@ class PlannerAgent:
     def plan(self, state: ReconState, all_modules: list[str]) -> dict[str, Any]:
         runnable = state.runnable_modules(all_modules)
         remaining = state.remaining_modules(all_modules)
-        descs = module_descriptions()
-        ctx = build_context_bundle(state)
 
         # Deterministic bootstrap: always start with subdomains if not done
         if "subdomains" not in state.completed_modules and "subdomains" in all_modules:
@@ -213,50 +283,9 @@ class PlannerAgent:
                 "priority": "none",
             }
 
-        skill = skill_system_block(
-            role="planner",
-            max_chars=9000,
-            context=str(ctx)[:3000],
-            modules=list(runnable)[:20],
-        )
-        system = AGENT_ROLES["planner"] + (
-            "\n\nRespond ONLY with a JSON object of this shape:\n"
-            '{\n'
-            '  "done": false,\n'
-            '  "next_agent": "discovery" | "content" | "vuln" | "visual" | "subdomain",\n'
-            '  "modules": ["httpprobe", "dns"],\n'
-            '  "reasoning": "why these next",\n'
-            '  "priority": "critical" | "high" | "medium" | "low"\n'
-            "}\n"
-            "Rules:\n"
-            "- modules must be a non-empty subset of RUNNABLE_MODULES (unless done=true).\n"
-            "- Prefer: after subdomains → dns+httpprobe; after alive hosts → crawl; "
-            "after urls → js/params then vuln modules; nuclei when hosts are alive.\n"
-            "- If takeover/secret/vuln signals exist, prioritize related modules.\n"
-            "- Set done=true only when remaining work is empty or further scanning is low value.\n"
-            "- Never invent modules outside the allowed list.\n"
-            "- Batch at most 3 modules per step.\n"
-            "- Never recommend exploitation tools or out-of-scope scanning.\n"
-        )
-        if skill:
-            system = system + "\n\n" + skill
-
-        user = (
-            f"TARGET: {state.target}\n"
-            f"COMPLETED: {state.completed_modules}\n"
-            f"REMAINING: {remaining}\n"
-            f"RUNNABLE_MODULES (prereqs met): {runnable}\n"
-            f"MODULE_DESCRIPTIONS: {descs}\n"
-            f"AGENT_MODULES: {AGENT_MODULES}\n"
-            f"CONTEXT: {ctx}\n"
-        )
-
         try:
             plan = self.llm.chat_json(
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                planner_messages(state, runnable),
                 temperature=0.1,
             )
         except Exception as e:
@@ -382,9 +411,9 @@ class AnalystAgent:
         self.name = "analyst"
 
     def report(self, state: ReconState) -> str:
-        ctx = build_context_bundle(state, max_files=20)
+        brief = recon_brief(state.outdir)
+        evidence = analyst_evidence(state.outdir)
         system = AGENT_ROLES["analyst"]
-        # Surface skills from findings text + completed modules
         findings_blob = ""
         eval_block = ""
         try:
@@ -396,35 +425,32 @@ class AnalystAgent:
                 if f.get("target") == state.target
             ]
             if findings:
-                rows = evaluate_findings(findings, limit=12, use_llm=False)
-                eval_block = "\n\nPRE-EVAL (heuristic confidence tiers):\n" + format_eval_report(rows)
+                rows = evaluate_findings(findings, limit=8, use_llm=False)
+                eval_block = "\nPRE-EVAL:\n" + format_eval_report(rows)
                 findings_blob = " ".join(
-                    f"{f.get('title','')} {f.get('module','')} {f.get('evidence','')[:80]}"
-                    for f in findings[:40]
+                    f"{f.get('title','')} {f.get('module','')}"
+                    for f in findings[:12]
                 )
         except Exception:
             pass
         skill = skill_system_block(
             role="analyst",
-            max_chars=11000,
-            context=(ctx or "")[:2000] + "\n" + findings_blob[:2000],
-            modules=list(state.completed_modules or []),
+            max_chars=7000,
+            context=(brief + "\n" + evidence + "\n" + findings_blob)[:2500],
+            modules=list(state.completed_modules or [])[:12],
         )
         if skill:
             system = system + "\n\n" + skill
         user = (
-            f"Produce a final recon report for target {state.target}.\n"
-            f"Completed modules: {state.completed_modules}\n"
-            f"Agent history: {state.history}\n"
-            f"Context: {ctx}\n"
-            f"{eval_block}\n\n"
-            "Structure:\n"
-            "1. Executive summary\n"
-            "2. Asset inventory (subdomains / alive / urls counts if known)\n"
-            "3. High-interest findings ONLY if tier C1+ (use PRE-EVAL; drop C0)\n"
-            "4. Suggested next steps: /prove techniques from PRE-EVAL next fields, /graph\n"
-            "5. Gaps / empty stages\n"
-            "Label each finding C0-C4. Candidates ≠ confirmed exploits. No C3 without proof."
+            f"target: {state.target}\n"
+            f"completed: {', '.join(state.completed_modules) or '-'}\n"
+            f"{brief}{evidence}{eval_block}\n"
+            "Write five short sections: Summary, Inventory, Leads, Next, Gaps.\n"
+            "Inventory repeats the counts above.\n"
+            "A lead needs a host or URL copied from evidence or PRE-EVAL. Tag C0-C4. "
+            "C2 needs a canary or proof already in that text. No C3.\n"
+            "Next names one /prove technique id from PRE-EVAL, or none. Do not claim it ran.\n"
+            "Gaps names empty files that block a check."
         )
         try:
             return self.llm.chat(

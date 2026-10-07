@@ -137,9 +137,11 @@ def evaluate_findings(
         if borderline:
             try:
                 system = (
-                    "You classify bug bounty findings. Reply with lines: "
-                    "ID=<id> TIER=C0|C1|C2 NEXT=drop|prove:tech|manual WHY=words\n"
-                    "Never invent C3/C4 without proof."
+                    "You classify authorized bug-bounty findings from the fields given. "
+                    "Reply with one line per finding: "
+                    "ID=<id> TIER=C0|C1|C2 NEXT=drop|prove:tech|manual WHY=<few words>\n"
+                    "Use C2 only when the title already says confirmed or canary. "
+                    "Never invent C3 or C4. Do not add exploit steps."
                 )
                 skill = skill_system_block(role="critic", max_chars=4000)
                 if skill:

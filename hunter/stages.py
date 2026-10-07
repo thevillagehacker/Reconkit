@@ -70,8 +70,13 @@ def _write(rk, path: Path, lines) -> int:
     return len(text.splitlines()) if text else 0
 
 
-def stage_permute(target: str, outdir: Path) -> None:
-    """Capped DNS permutations of known subdomains (alterx/dnsgen) then dnsx."""
+def stage_permute(target: str, outdir: Path, resolve: bool = True) -> None:
+    """Capped DNS permutations of known subdomains (alterx/dnsgen).
+
+    `resolve=False` only writes permute_raw.txt. The dns module then resolves
+    those names in its single dnsx pass and merges the ones that answer.
+    `resolve=True` (permute without dns) still resolves here and merges hits.
+    """
     rk = _rk()
     rk.step("DNS permutations (capped)", phase="permute")
     subs = outdir / "subdomains.txt"
@@ -103,6 +108,9 @@ def stage_permute(target: str, outdir: Path) -> None:
     if len(generated) > cap:
         generated = set(sorted(generated)[:cap])
     (outdir / "permute_raw.txt").write_text("\n".join(sorted(generated)) + "\n", encoding="utf-8")
+    if not resolve:
+        rk.info("permute: saved guesses; the dns module resolves them in one pass")
+        return
     dnsx = rk.which("dnsx")
     resolved: list[str] = []
     if dnsx and generated:
@@ -404,13 +412,11 @@ def stage_gfextra(target: str, outdir: Path, urls_file: Path) -> None:
     if not urls_file.exists() or not rk.which("gf"):
         rk.warn("gf/urls missing; skipping gfextra.")
         return
-    data = urls_file.read_bytes()
-    for pat, fname in (("redirect", "redirect_candidates.txt"),
-                       ("lfi", "lfi_candidates.txt"),
-                       ("interestingparams", "interesting_params.txt")):
-        out = rk.pipeline([["gf", pat]], input_data=data)
-        lines = rk.filter_urls_to_target(out.decode(errors="ignore").splitlines(), target)
-        _write(rk, outdir / fname, lines[:3000])
+    # Shared with xss/sqli/ssrf. A bucket newer than urls.txt is not run again.
+    rk.classify_urls(
+        outdir, urls_file, target,
+        patterns=("redirect", "lfi", "interestingparams"),
+    )
     rk.ok("gf extra: redirect / lfi / interestingparams lists written")
 
 

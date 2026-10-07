@@ -238,8 +238,8 @@ python reconkit.py modules
 | Module | Role |
 |--------|------|
 | `subdomains` | Passive / API subdomain enum |
-| `permute` | Capped DNS permutations (alterx/dnsgen -> dnsx) |
-| `dns` | dnsx + CNAME takeover candidates |
+| `permute` | Capped DNS permutations (alterx/dnsgen). dnsx only when dns is not in the same run |
+| `dns` | One dnsx pass: records, resolved hosts, CNAME takeover candidates |
 | `ports` | In-scope naabu connect-scan + httpx |
 | `httpprobe` | httpx alive / tech (session headers; WAF -> stealth) |
 | `tls` | tlsx certs / JARM |

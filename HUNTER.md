@@ -51,7 +51,7 @@ python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
 
 | Feature | How |
 |---------|-----|
-| Capped DNS permutations | module `permute` (alterx/dnsgen, then dnsx) |
+| Capped DNS permutations | module `permute` (alterx/dnsgen; dnsx only if dns is not in the same run) |
 | In-scope port probe | module `ports` (naabu connect-scan + httpx) |
 | gf extras (redirect / lfi / interestingparams) | module `gfextra` |
 | Well-known / robots / security.txt | module `wellknown` |
@@ -130,11 +130,16 @@ curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
 ## New modules (pipeline order)
 
 ```
-subdomains -> permute -> dns -> ports -> httpprobe -> tls -> wellknown
-         -> crawl -> js -> jsintel -> params -> apis -> content -> bypass403 -> gfextra
+subdomains -> permute -> dns -> httpprobe -> (tls, wellknown, ports, crawl)
+         -> js -> jsintel -> params -> apis -> content -> bypass403 -> gfextra
          -> xss -> sqli -> ssrf_ssti -> redirect -> cors -> graphql
          -> nuclei -> cloud -> takeover_plus -> osint -> gitrecon -> screenshots
 ```
+
+Passive name sources run together. Amass uses its own cap inside that pool.
+One dnsx pass writes resolved hosts, records, and CNAME lines. httpx probes
+before naabu. tls, well-known, ports, and crawl overlap after alive.txt and
+join before js. xss, sqli, ssrf, and gfextra share one URL classification.
 
 List descriptions anytime: `/modules` or `python reconkit.py modules`.
 
@@ -159,7 +164,7 @@ tools/subdomains/subfinder.txt
 subdomains.txt          # already has subfinder names
 ```
 
-Amass is last and capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). dnsx, httpx,
+Amass runs with the other passive sources and is capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). dnsx, httpx,
 tlsx, crawl, and each nuclei pack have their own caps (`RECON_DNSX_TIMEOUT`,
 `RECON_HTTPX_TIMEOUT`, `RECON_TLSX_TIMEOUT`, `RECON_CRAWL_TIMEOUT`,
 `RECON_NUCLEI_TIMEOUT`). A cap keeps the partial file and moves on. The same

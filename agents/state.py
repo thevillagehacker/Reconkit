@@ -271,3 +271,236 @@ def build_context_bundle(state: ReconState, max_files: int = 12) -> dict[str, An
         "findings": state.findings,
         "outputs": file_summaries,
     }
+
+
+# Counts always shown, including zeros. These decide the next module.
+_CORE_COUNTS = (
+    "subdomains.txt",
+    "resolved.txt",
+    "permute_raw.txt",
+    "permute_resolved.txt",
+    "alive.txt",
+    "urls.txt",
+    "cname_takeover_candidates.txt",
+)
+# Shown only when the file has lines.
+_EXTRA_COUNTS = (
+    "dns_records.txt",
+    "gf_xss.txt",
+    "gf_sqli.txt",
+    "gf_ssrf.txt",
+    "gf_ssti.txt",
+    "redirect_candidates.txt",
+    "lfi_candidates.txt",
+    "interesting_params.txt",
+    "param_names.txt",
+    "param_priority.txt",
+    "sensitive_paths_found.txt",
+    "js_urls.txt",
+    "tech_routes.txt",
+    "xss_reflected_params.txt",
+    "open_s3_buckets.txt",
+)
+# ports stays eligible when alive.txt is empty; it does not read that file.
+_ALIVE_MODULES = (
+    "tls", "wellknown", "crawl", "content", "bypass403",
+    "cors", "nuclei", "screenshots",
+)
+_URL_MODULES = (
+    "js", "jsintel", "params", "apis", "gfextra",
+    "xss", "sqli", "ssrf_ssti", "redirect", "graphql",
+    "cloud", "takeover_plus", "gitrecon",
+)
+_HEAD_FILES = (
+    "cname_takeover_candidates.txt",
+    "alive.txt",
+    "tech_routes.txt",
+    "sensitive_paths_found.txt",
+    "xss_reflected_params.txt",
+)
+_EVIDENCE_FILES = (
+    "cname_takeover_candidates.txt",
+    "tech_routes.txt",
+    "sensitive_paths_found.txt",
+    "xss_reflected_params.txt",
+    "sqli_error_based.txt",
+    "ssti_candidates.txt",
+    "ssrf_metadata_candidates.txt",
+    "open_s3_buckets.txt",
+    "js_secrets_and_endpoints.json",
+    "param_priority.txt",
+    "cors_candidates.txt",
+    "graphql_endpoints.txt",
+)
+
+
+def _nonempty_count(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    count = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                if raw.strip():
+                    count += 1
+    except OSError:
+        return 0
+    return count
+
+
+def _head(path: Path, limit: int = 3, width: int = 160) -> list[str]:
+    if not path.is_file() or limit <= 0:
+        return []
+    rows: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                text = raw.strip()
+                if not text:
+                    continue
+                rows.append(text[:width])
+                if len(rows) >= limit:
+                    break
+    except OSError:
+        return []
+    return rows
+
+
+def _has_token(path: Path, token: str, limit: int) -> bool:
+    if not path.is_file():
+        return False
+    needle = token.lower()
+    seen = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                if not raw.strip():
+                    continue
+                seen += 1
+                if needle in raw.lower():
+                    return True
+                if seen >= limit:
+                    break
+    except OSError:
+        return False
+    return False
+
+
+def _in_run(name: str, runnable: list[str] | None) -> bool:
+    return runnable is None or name in runnable
+
+
+def recon_brief(outdir: Path | str, runnable: list[str] | None = None) -> str:
+    """Counts, skip rules, and a few head lines. No full file bodies."""
+    root = Path(outdir)
+    counts = {
+        name: _nonempty_count(root / name) if root.is_dir() else 0
+        for name in _CORE_COUNTS + _EXTRA_COUNTS
+    }
+    nuclei_lines = 0
+    nuclei_n = 0
+    if root.is_dir():
+        for path in sorted(root.glob("nuclei_*.txt"))[:8]:
+            nuclei_n += 1
+            nuclei_lines += _nonempty_count(path)
+
+    lines = ["counts:"]
+    lines.append(" ".join(f"{name}={counts[name]}" for name in _CORE_COUNTS))
+    extra = [f"{name}={counts[name]}" for name in _EXTRA_COUNTS if counts[name]]
+    if extra:
+        lines.append(" ".join(extra))
+    if nuclei_n:
+        lines.append(f"nuclei_files={nuclei_n} nuclei_lines={nuclei_lines}")
+
+    lines.append("notes:")
+    lines.append("Unresolved permute names are not hosts. Use resolved.txt and alive.txt.")
+
+    skips: list[str] = []
+    reasons: list[str] = []
+
+    def add_skips(names: tuple[str, ...], reason: str) -> None:
+        picked = [name for name in names if _in_run(name, runnable)]
+        if not picked:
+            return
+        for name in picked:
+            if name not in skips:
+                skips.append(name)
+        if reason not in reasons:
+            reasons.append(reason)
+
+    if counts["alive.txt"] == 0:
+        add_skips(_ALIVE_MODULES, "alive.txt has 0 lines")
+    if counts["urls.txt"] == 0:
+        add_skips(_URL_MODULES, "urls.txt has 0 lines")
+    elif _in_run("graphql", runnable):
+        seen_gql = any(
+            _has_token(root / name, "graphql", cap)
+            for name, cap in (("alive.txt", 40), ("tech_routes.txt", 40), ("urls.txt", 200))
+        )
+        if not seen_gql:
+            add_skips(("graphql",), "no graphql token in alive, tech_routes, or the url head")
+
+    if skips:
+        lines.append("skip_if_chosen: " + " ".join(skips))
+        lines.append("why: " + "; ".join(reasons))
+
+    if counts["cname_takeover_candidates.txt"]:
+        note = "signal: dangling CNAME already recorded in cname_takeover_candidates.txt. Do not pick dns again."
+        if _in_run("takeover_plus", runnable) and "takeover_plus" not in skips:
+            note += " takeover_plus outranks another crawl."
+        lines.append(note)
+    xss_hits = counts["gf_xss.txt"] or counts["xss_reflected_params.txt"]
+    if xss_hits and _in_run("xss", runnable) and "xss" not in skips:
+        lines.append("signal: xss candidates exist. xss outranks a second crawl.")
+    if counts["gf_sqli.txt"] and _in_run("sqli", runnable) and "sqli" not in skips:
+        lines.append("signal: sqli candidates exist. sqli outranks a blind content fuzz.")
+    if counts["sensitive_paths_found.txt"]:
+        lines.append("signal: sensitive_paths_found.txt has hits.")
+
+    heads: list[str] = []
+    for name in _HEAD_FILES:
+        if not counts.get(name):
+            continue
+        sample = _head(root / name, 3, 160)
+        if sample:
+            heads.append(name + ":\n" + "\n".join(sample))
+        if len(heads) >= 5:
+            break
+    if root.is_dir() and len(heads) < 6:
+        needles = ("critical", "high", "medium")
+        for path in sorted(root.glob("nuclei_*.txt"))[:4]:
+            matched = [
+                row for row in _head(path, 12, 160)
+                if any(needle in row.lower() for needle in needles)
+            ][:2]
+            if matched:
+                heads.append(path.name + ":\n" + "\n".join(matched))
+                break
+    if heads:
+        lines.append("heads:")
+        lines.extend(heads)
+    return "\n".join(lines) + "\n"
+
+
+def analyst_evidence(outdir: Path | str, *, max_files: int = 6, per_file: int = 4) -> str:
+    """Short heads of high-signal files. Bulk host and URL lists stay as counts."""
+    root = Path(outdir)
+    if not root.is_dir():
+        return "evidence: (no output dir)\n"
+    chunks: list[str] = []
+    for name in _EVIDENCE_FILES:
+        if len(chunks) >= max_files:
+            break
+        sample = _head(root / name, per_file, 160)
+        if sample:
+            chunks.append(name + ":\n" + "\n".join(sample))
+    if root.is_dir() and len(chunks) < max_files:
+        for path in sorted(root.glob("nuclei_*.txt")):
+            if len(chunks) >= max_files:
+                break
+            sample = _head(path, per_file, 160)
+            if sample:
+                chunks.append(path.name + ":\n" + "\n".join(sample))
+    if not chunks:
+        return "evidence: (no high-signal heads)\n"
+    return "evidence:\n" + "\n".join(chunks) + "\n"

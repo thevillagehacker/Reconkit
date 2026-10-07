@@ -15,11 +15,13 @@
 
 ## Yield-based decisions
 
+`skip_if_chosen` in the user message wins over this table.
+
 - **subdomains.txt lines high, alive.txt empty** → fix connectivity / re-run httpprobe; do not start vuln URL modules.
 - **alive.txt high, urls.txt empty** → crawl before xss/sqli.
 - **urls high** → prefer `js` + `nuclei` before heavy `content` fuzz on entire scope.
 - **nuclei critical/high present** → note for analyst; optional later prove `nuclei_recheck`.
-- **cname_takeover_candidates non-empty** → elevate priority in report; human validates.
+- **cname_takeover_candidates non-empty** → already a finding. Do not schedule dns again. If takeover_plus is runnable and not skipped, it outranks another crawl. Human validates.
 
 ## Time budget (max_steps)
 
