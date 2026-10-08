@@ -1363,6 +1363,15 @@ def write_utf8(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def failed_empty(data: bytes | str, rc: int) -> bool:
+    """A non-zero exit with no bytes must not replace a previous artifact."""
+    if rc == 0:
+        return False
+    if isinstance(data, bytes):
+        return not data.strip()
+    return not str(data).strip()
+
+
 def write_host_list(path: Path, hosts) -> int:
     """One hostname/URL per line, ANSI-stripped, unique, preserve order."""
     seen: set[str] = set()
@@ -1755,6 +1764,9 @@ def classify_urls(
 
     def _one(pat: str) -> None:
         out = pipeline([["gf", pat]], input_data=data, timeout=tool_cap("gf"))
+        if failed_empty(out, int(_LAST_PIPE_RC)):
+            warn(f"gf {pat} returned nothing after a non-zero exit; bucket left unchanged")
+            return
         lines = filter_urls_to_target(out.decode(errors="ignore").splitlines(), target)
         cap = _GF_LINE_CAP.get(pat)
         if cap is not None:
@@ -3116,21 +3128,26 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
     )
     resolved_hosts, rec_lines, cname_lines = split_dnsx_records(records.decode(errors="ignore"))
     # A clean empty answer is still a finished pass. A timeout or error with no
-    # bytes leaves the tool files missing so --resume tries again.
+    # bytes leaves the previous resolved, record, and CNAME files in place.
     dns_rc = int(_LAST_PIPE_RC)
-    if records.strip() or dns_rc == 0:
-        if not records.strip():
-            save_tool_raw(outdir, "dns", "dnsx-records", "\n")
-        save_tool_raw(
-            outdir, "dns", "dnsx-resolved",
-            "\n".join(resolved_hosts) if resolved_hosts else "\n",
-        )
-        save_tool_raw(
-            outdir, "dns", "dnsx-cname",
-            "\n".join(cname_lines) if cname_lines else "\n",
-        )
-    else:
-        warn("dnsx returned nothing after a non-zero exit; resume will retry this pass")
+    if failed_empty(records, dns_rc):
+        warn("dnsx returned nothing after a non-zero exit; previous DNS files were kept")
+        if cl:
+            cl.finish_tool("dnsx-records", 0)
+            cl.start_tool("dnsx-cname")
+            cl.finish_tool("dnsx-cname", 0)
+            cl.stop(final_msg=f"DNS · {n_subs} host(s)")
+        return
+    if not records.strip():
+        save_tool_raw(outdir, "dns", "dnsx-records", "\n")
+    save_tool_raw(
+        outdir, "dns", "dnsx-resolved",
+        "\n".join(resolved_hosts) if resolved_hosts else "\n",
+    )
+    save_tool_raw(
+        outdir, "dns", "dnsx-cname",
+        "\n".join(cname_lines) if cname_lines else "\n",
+    )
     n_res = write_host_list(outdir / "resolved.txt", resolved_hosts)
     write_utf8(outdir / "dns_records.txt", "\n".join(rec_lines) + ("\n" if rec_lines else ""))
     if cl:
@@ -3228,9 +3245,12 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
                 outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
             )
     text = strip_ansi(result.decode("utf-8", errors="replace"))
-    write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
-    _filter_wildcard_http(alive_file, outdir, outdir.name)
-    write_clean_alive_urls(alive_file, outdir)
+    if failed_empty(text, int(_LAST_PIPE_RC)) and alive_file.exists() and alive_file.stat().st_size:
+        warn("httpx returned nothing after a non-zero exit; keeping the previous alive.txt")
+    else:
+        write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
+        _filter_wildcard_http(alive_file, outdir, outdir.name)
+        write_clean_alive_urls(alive_file, outdir)
     n = len([ln for ln in alive_file.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()])
     if cl:
         cl.finish_tool("httpx", n)
@@ -3299,12 +3319,17 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
                 [["tlsx", "-silent", "-json"]], hosts,
                 outdir=outdir, stage="tls", tool="tlsx", cap_key="tlsx", suffix=".json",
             )
-    n = len([ln for ln in result.decode(errors="ignore").splitlines() if ln.strip()])
+    text = strip_ansi(result.decode("utf-8", errors="replace"))
+    n = len([ln for ln in text.splitlines() if ln.strip()])
     if cl:
         cl.finish_tool("tlsx", n)
         cl.stop(final_msg=f"TLS · {len(host_list)} host(s)")
-    write_utf8(outdir / "tls_recon.json", strip_ansi(result.decode("utf-8", errors="replace")))
-    ok(f"TLS recon -> {outdir / 'tls_recon.json'}")
+    tls_path = outdir / "tls_recon.json"
+    if failed_empty(text, int(_LAST_PIPE_RC)) and tls_path.exists() and tls_path.stat().st_size:
+        warn("tlsx returned nothing after a non-zero exit; keeping the previous tls_recon.json")
+    else:
+        write_utf8(tls_path, text)
+    ok(f"TLS recon -> {tls_path}")
 
 
 def stage_crawl(alive_file: Path, outdir: Path) -> Path:

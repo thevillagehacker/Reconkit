@@ -247,16 +247,21 @@ def stage_wellknown(target: str, outdir: Path, alive_file: Path) -> None:
             "Run httpprobe first for full coverage."
         )
         hosts = [target]
-    hits: list[str] = []
-    for host in hosts:
-        rk._rate_delay()
-        r = rk.pipeline(
-            [["httpx", "-silent", "-mc", "200,204,301,302,401,403",
-              "-path", ",".join(WELLKNOWN), *_headers_httpx()]],
-            input_data=(host + "\n").encode(),
-        )
-        hits.extend(ln for ln in r.decode(errors="ignore").splitlines() if ln.strip())
-    n = _write(rk, outdir / "wellknown.txt", hits)
+    # One httpx process, same shape as the sensitive-path batch. The URL on
+    # each output line keeps the hit tied to its host.
+    blob = rk.pipe_into(
+        [["httpx", "-silent", "-threads", rk._httpx_threads(),
+          "-mc", "200,204,301,302,401,403",
+          "-path", ",".join(WELLKNOWN), *_headers_httpx()]],
+        ("\n".join(hosts) + "\n").encode(),
+        outdir=outdir, stage="wellknown", tool="httpx", cap_key="httpx",
+    )
+    dest = outdir / "wellknown.txt"
+    if rk.failed_empty(blob, int(rk._LAST_PIPE_RC)) and dest.exists() and dest.stat().st_size:
+        rk.warn("httpx returned nothing after a non-zero exit; keeping the previous wellknown.txt")
+        return
+    hits = [ln for ln in blob.decode(errors="ignore").splitlines() if ln.strip()]
+    n = _write(rk, dest, hits)
     rk.ok(f"well-known hits: {n} → wellknown.txt")
 
 

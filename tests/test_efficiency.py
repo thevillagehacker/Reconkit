@@ -255,6 +255,115 @@ def test_gf_buckets_are_reused(tmp: Path):
         rk.pipeline = orig_pipe
 
 
+def test_failed_empty_dns_keeps_previous_files(tmp: Path):
+    import reconkit as rk
+
+    (tmp / "subdomains.txt").write_text("a.example.com\n", encoding="utf-8")
+    (tmp / "resolved.txt").write_text("keep.example.com\n", encoding="utf-8")
+    (tmp / "dns_records.txt").write_text("keep.example.com [A] 1.2.3.4\n", encoding="utf-8")
+    (tmp / "cname_takeover_candidates.txt").write_text(
+        "keep.example.com [CNAME] x.github.io\n", encoding="utf-8"
+    )
+    orig_which, orig_pipe = rk.which, rk.pipe_into
+
+    def pipe(*_a, **_k):
+        rk._LAST_PIPE_RC.set(124)
+        return b""
+
+    rk.which = lambda name: "dnsx" if name == "dnsx" else None
+    rk.pipe_into = pipe
+    try:
+        rk.stage_dns("example.com", tmp, tmp / "subdomains.txt")
+    finally:
+        rk.which = orig_which
+        rk.pipe_into = orig_pipe
+    assert "keep.example.com" in (tmp / "resolved.txt").read_text(encoding="utf-8")
+    assert "1.2.3.4" in (tmp / "dns_records.txt").read_text(encoding="utf-8")
+    assert "github.io" in (tmp / "cname_takeover_candidates.txt").read_text(encoding="utf-8")
+
+
+def test_failed_empty_http_probe_keeps_previous_alive(tmp: Path):
+    import reconkit as rk
+
+    subs = tmp / "subdomains.txt"
+    subs.write_text("a.example.com\n", encoding="utf-8")
+    alive = tmp / "alive.txt"
+    alive.write_text("https://keep.example.com [200]\n", encoding="utf-8")
+    orig_which, orig_pipe = rk.which, rk.pipe_into
+
+    def pipe(*_a, **_k):
+        rk._LAST_PIPE_RC.set(124)
+        return b""
+
+    rk.which = lambda name: "httpx" if name == "httpx" else None
+    rk.pipe_into = pipe
+    try:
+        rk.stage_httpprobe(subs, tmp)
+    finally:
+        rk.which = orig_which
+        rk.pipe_into = orig_pipe
+    assert "keep.example.com" in alive.read_text(encoding="utf-8")
+
+
+def test_wellknown_is_one_httpx_batch(tmp: Path):
+    from hunter.stages import stage_wellknown
+    import reconkit as rk
+
+    alive = tmp / "alive.txt"
+    alive.write_text("https://a.example.com [200]\nhttps://b.example.com [200]\n", encoding="utf-8")
+    calls: list[dict] = []
+    orig_which, orig_pipe = rk.which, rk.pipe_into
+
+    def pipe(commands, input_data=b"", **kwargs):
+        calls.append({"cmd": list(commands[0]), "data": input_data, "tool": kwargs.get("tool")})
+        rk._LAST_PIPE_RC.set(0)
+        return b"https://a.example.com/robots.txt [200]\n"
+
+    rk.which = lambda name: "httpx" if name == "httpx" else None
+    rk.pipe_into = pipe
+    try:
+        stage_wellknown("example.com", tmp, alive)
+    finally:
+        rk.which = orig_which
+        rk.pipe_into = orig_pipe
+    assert len(calls) == 1
+    assert calls[0]["tool"] == "httpx"
+    assert "-path" in calls[0]["cmd"]
+    assert "/robots.txt" in calls[0]["cmd"][calls[0]["cmd"].index("-path") + 1]
+    assert b"a.example.com" in calls[0]["data"]
+    assert b"b.example.com" in calls[0]["data"]
+    assert "robots.txt" in (tmp / "wellknown.txt").read_text(encoding="utf-8")
+
+
+def test_failed_empty_gf_does_not_freeze_an_empty_bucket(tmp: Path):
+    import reconkit as rk
+
+    urls = tmp / "urls.txt"
+    urls.write_text("https://a.example.com/?q=1\n", encoding="utf-8")
+    orig_which, orig_pipe = rk.which, rk.pipeline
+    calls = {"n": 0}
+
+    def pipe(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            rk._LAST_PIPE_RC.set(124)
+            return b""
+        rk._LAST_PIPE_RC.set(0)
+        return b""
+
+    rk.which = lambda name: "gf" if name == "gf" else None
+    rk.pipeline = pipe
+    try:
+        rk.classify_urls(tmp, urls, "example.com", patterns=("xss",))
+        assert not (tmp / "gf_xss.txt").exists()
+        rk.classify_urls(tmp, urls, "example.com", patterns=("xss",))
+    finally:
+        rk.which = orig_which
+        rk.pipeline = orig_pipe
+    assert (tmp / "gf_xss.txt").is_file()
+    assert calls["n"] == 2
+
+
 if __name__ == "__main__":
     import tempfile
 
@@ -271,4 +380,12 @@ if __name__ == "__main__":
         test_dns_is_one_pass_and_drops_unresolved_guesses(Path(directory))
     with tempfile.TemporaryDirectory() as directory:
         test_gf_buckets_are_reused(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_failed_empty_dns_keeps_previous_files(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_failed_empty_http_probe_keeps_previous_alive(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_failed_empty_gf_does_not_freeze_an_empty_bucket(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_wellknown_is_one_httpx_batch(Path(directory))
     print("ok")
