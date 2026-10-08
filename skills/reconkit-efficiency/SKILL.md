@@ -51,7 +51,7 @@ Set `done=true` when any hold:
 ## Token hygiene for Ollama
 
 - System skill: keep loaded; do not re-paste full tips every turn
-- User message: file counts, skip_if_chosen, and a few head lines. No module-description dump and no history.
+- User message: file counts, skip_if_chosen, a few head lines, the previous step's tool counts, and technique_signals. No module-description dump and no earlier transcript.
 - No multi-page markdown in planner output — **JSON only**
 - Temperature 0.1–0.2 for plan/eval
 

@@ -855,6 +855,8 @@ python recon_agents.py run --target example.com --provider google --model gemini
 
 Artifacts: `~/.reconkit/output/example.com/agent_state.json`, `agent_report.md`.
 
+Each `/agent` step asks the model for the next 1 to 3 modules and one prove technique id, or `none`. The id is stored on that step. `/prove run` is still the command that performs the check. `/run` does not ask the model.
+
 ---
 
 ## 14. Agent skill suite (core + on-demand)

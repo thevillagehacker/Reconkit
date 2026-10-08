@@ -884,16 +884,15 @@ Gemini, OpenAI, ...). **Skills** inject methodology by role + vuln surface.
 
 | Agent | Modules |
 |-------|---------|
-| `subdomain` | `subdomains` |
-| `discovery` | `dns`, `httpprobe`, `tls` |
-| `content` | `crawl`, `js`, `params`, `content` |
-| `vuln` | `xss`, `sqli`, `ssrf_ssti`, `nuclei`, `cloud` |
+| `subdomain` | `subdomains`, `permute` |
+| `discovery` | `dns`, `ports`, `httpprobe`, `tls`, `wellknown`, `osint` |
+| `content` | `crawl`, `js`, `jsintel`, `params`, `apis`, `content`, `bypass403`, `gfextra` |
+| `vuln` | `xss`, `sqli`, `ssrf_ssti`, `redirect`, `cors`, `graphql`, `nuclei`, `cloud`, `takeover_plus`, `gitrecon` |
 | `visual` | `screenshots` |
-| `planner` | decides next step (no tools) |
+| `planner` | each step chooses the next modules and one prove technique |
 | `analyst` | final `agent_report.md` |
 
-If the LLM is down, **heuristics** still advance the pipeline.
-The planner sees file counts, a skip list when `alive.txt` or `urls.txt` is empty, and a few head lines. It does not receive module descriptions or full file bodies. `/run` does not ask the model which module to run.
+Each `/agent` step asks the model. The step sees file counts, the skip list, a few head lines, and the tool counts from the step that just finished. It chooses 1 to 3 modules and names one allowed `/prove` technique, or `none`. The agent records that name and does not run `/prove`. You start the check with `/prove run <target> --technique <id>`. An empty target still begins with `subdomains` when the model stops or names nothing runnable. If the model is down, a fixed ladder continues and leaves out modules whose input file is empty. `/run` does not ask the model which module to run.
 
 ### Providers (list)
 

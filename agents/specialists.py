@@ -60,7 +60,8 @@ AGENT_ROLES: dict[str, str] = {
         "You summarize which live hosts were screenshotted."
     ),
     "planner": (
-        "You choose the next recon modules for one authorized target from the file counts."
+        "You choose the next recon modules and one prove technique for one authorized target. "
+        "Use the file counts and the tool that just finished."
     ),
     "analyst": (
         "You write a short recon report from file counts and heads. You do not invent findings."
@@ -70,16 +71,19 @@ AGENT_ROLES: dict[str, str] = {
 _PLANNER_RULES = (
     "Reply with one JSON object and nothing else:\n"
     '{"done":false,"next_agent":"discovery","modules":["dns","httpprobe"],'
-    '"reasoning":"at most 40 words","priority":"high"}\n'
+    '"technique":"none","reasoning":"at most 40 words","priority":"high"}\n'
     "next_agent is one of: subdomain, discovery, content, vuln, visual.\n"
     "modules is 1 to 3 names from runnable, all owned by next_agent.\n"
     "priority is critical, high, medium, or low.\n"
     "File counts and heads outrank the default pipeline in the skill text.\n"
     "Obey skip_if_chosen. Unresolved permute names are not hosts.\n"
+    "Use last_step. Those lines are the tool that just finished.\n"
     "Prefer the runnable module that reads a non-empty file the completed modules have not used.\n"
     "A non-empty cname_takeover_candidates.txt is already a finding: do not pick dns again.\n"
-    "Set done to true when runnable is empty, or when every runnable module is listed in skip_if_chosen.\n"
-    "Do not invent modules, start /prove, widen scope, or mention sqlmap, shells, or dumps."
+    "Set done to true when runnable is empty, when every runnable module is listed in skip_if_chosen, "
+    "or when the counts do not justify another module.\n"
+    "technique is one id from technique_signals, or none. Name it from the files. Do not run it.\n"
+    "Do not invent modules, widen scope, or mention sqlmap, shells, or dumps."
 )
 
 
@@ -112,19 +116,139 @@ def tool_result_lines(tool_results: list[dict]) -> str:
     return "\n".join(rows)
 
 
+# A technique is eligible only when one of these files already has a hit.
+# sqli_boolean also requires allow_sqli_boolean in the prove policy.
+_TECHNIQUE_FILES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("xss_reflect", ("xss_reflected_params.txt", "gf_xss.txt")),
+    ("sqli_boolean", ("sqli_error_based.txt", "sqli_boolean_based.txt", "gf_sqli.txt")),
+    ("ssti_math", ("ssti_candidates.txt", "gf_ssti.txt")),
+    ("ssrf_canary_review", ("ssrf_metadata_candidates.txt", "gf_ssrf.txt")),
+    ("takeover_fingerprint", ("cname_takeover_candidates.txt", "takeover_plus.txt")),
+    ("cors_origin", ("cors_candidates.txt",)),
+    ("graphql_typename", ("graphql_endpoints.txt",)),
+    ("redirect_canary", ("redirect_candidates.txt", "redirect_hits.txt")),
+    ("idor_session_diff", ("idor_candidates.txt",)),
+)
+
+
+def _nonempty_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                if raw.strip():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _text_has(path: Path, needles: tuple[str, ...], limit: int = 8192) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        blob = path.read_text(encoding="utf-8", errors="replace")[:limit].lower()
+    except OSError:
+        return False
+    return any(needle in blob for needle in needles)
+
+
+def technique_signals(outdir: Path | str) -> list[str]:
+    """Prove technique ids the current files already support. Empty means none."""
+    root = Path(outdir)
+    if not root.is_dir():
+        return []
+    try:
+        from prove.policy import load_policy
+        policy = load_policy()
+    except Exception:
+        return []
+    allowed = set(policy.get("allowed_techniques") or [])
+    found: list[str] = []
+    for tech, names in _TECHNIQUE_FILES:
+        if tech not in allowed:
+            continue
+        if tech == "sqli_boolean" and not policy.get("allow_sqli_boolean"):
+            continue
+        if any(_nonempty_file(root / name) for name in names):
+            found.append(tech)
+    if "nuclei_recheck" in allowed:
+        for path in sorted(root.glob("nuclei_*.txt"))[:8]:
+            if _text_has(path, ("critical", "high", "medium"), 4000):
+                found.append("nuclei_recheck")
+                break
+    if "jwt_inspect" in allowed and _text_has(
+        root / "js_secrets_and_endpoints.json", ("jwt", "eyj")
+    ):
+        found.append("jwt_inspect")
+    return found
+
+
+def clip_technique(value: Any, outdir: Path | str) -> str:
+    """Keep a model technique only when the files already signal it."""
+    if isinstance(value, list):
+        value = value[0] if value else "none"
+    name = str(value or "none").strip().lower()
+    if name in ("", "none", "null"):
+        return "none"
+    if name in set(technique_signals(outdir)):
+        return name
+    return "none"
+
+
+def skip_names(brief: str) -> set[str]:
+    for line in brief.splitlines():
+        if line.startswith("skip_if_chosen:"):
+            return set(line.split(":", 1)[1].split())
+    return set()
+
+
+def last_step_text(state: ReconState) -> str:
+    """Counts from the tool that just finished. No file bodies."""
+    if not state.history:
+        return "last_step: none\n"
+    step = state.history[-1]
+    details = step.get("details") or {}
+    modules = ",".join(str(mod) for mod in (step.get("modules") or [])) or "-"
+    technique = str(details.get("technique") or "none")
+    ran = tool_result_lines(details.get("tool_results") or [])
+    note = " ".join(str(step.get("summary") or "").split())[:240]
+    lines = [f"last_step: modules={modules} technique={technique}"]
+    if ran:
+        lines.append(ran[:500])
+    if note:
+        lines.append("note: " + note)
+    return "\n".join(lines)[:700] + "\n"
+
+
+def named_techniques(state: ReconState) -> list[str]:
+    names: list[str] = []
+    for step in state.history:
+        tech = str((step.get("details") or {}).get("technique") or "none")
+        if tech != "none" and tech not in names:
+            names.append(tech)
+    return names
+
+
 def planner_user(state: ReconState, runnable: list[str], brief: str | None = None) -> str:
     owners = "; ".join(
         f"{agent}={','.join(mods)}" for agent, mods in AGENT_MODULES.items()
     )
     if brief is None:
         brief = recon_brief(state.outdir, runnable)
+    signals = technique_signals(state.outdir)
+    signal_line = "technique_signals: " + (" ".join(signals) if signals else "none")
     return (
         f"target: {state.target}\n"
         f"completed: {', '.join(state.completed_modules) or '-'}\n"
         f"runnable: {', '.join(runnable) or '-'}\n"
         f"owners: {owners}\n"
         f"{brief}"
-        "Choose from runnable. Obey skip_if_chosen.\n"
+        f"{last_step_text(state)}"
+        f"{signal_line}\n"
+        "Choose from runnable. Obey skip_if_chosen. "
+        "Set technique to one id from technique_signals, or none.\n"
     )
 
 
@@ -263,28 +387,19 @@ class PlannerAgent:
         runnable = state.runnable_modules(all_modules)
         remaining = state.remaining_modules(all_modules)
 
-        # Deterministic bootstrap: always start with subdomains if not done
-        if "subdomains" not in state.completed_modules and "subdomains" in all_modules:
-            return {
-                "done": False,
-                "next_agent": "subdomain",
-                "modules": ["subdomains"],
-                "reasoning": "Bootstrap: Agent 1 must enumerate subdomains before any downstream work.",
-                "priority": "critical",
-            }
-
-        # If nothing left, finish without LLM
+        # Nothing left to schedule. This path does not call the model.
         if not remaining:
             return {
                 "done": True,
                 "next_agent": None,
                 "modules": [],
+                "technique": "none",
                 "reasoning": "All modules completed.",
                 "priority": "none",
             }
 
         try:
-            plan = self.llm.chat_json(
+            raw = self.llm.chat_json(
                 planner_messages(state, runnable),
                 temperature=0.1,
             )
@@ -293,29 +408,47 @@ class PlannerAgent:
             plan["reasoning"] = f"[LLM fallback: {e}] " + plan.get("reasoning", "")
             return plan
 
-        return self._validate_plan(plan, runnable, remaining)
+        if not isinstance(raw, dict):
+            raw = {}
+        return self._validate_plan(raw, state, runnable, remaining)
 
     def _validate_plan(
         self,
         plan: dict[str, Any],
+        state: ReconState,
         runnable: list[str],
         remaining: list[str],
     ) -> dict[str, Any]:
+        brief = recon_brief(state.outdir, runnable)
+        skipped = skip_names(brief)
         done = bool(plan.get("done"))
         modules = plan.get("modules") or []
         if not isinstance(modules, list):
             modules = []
-        modules = [m for m in modules if m in runnable]
+        modules = [m for m in modules if m in runnable and m not in skipped][:3]
+        technique = clip_technique(plan.get("technique"), state.outdir)
 
         agent = plan.get("next_agent")
+        # An empty output dir still has to enumerate names. A model that
+        # stops, or that names nothing runnable, does not skip that step.
+        fresh = not state.completed_modules and "subdomains" in runnable
+        if fresh and (done or not modules):
+            done = False
+            modules = ["subdomains"]
+            agent = "subdomain"
+            technique = "none"
+
         if agent not in AGENT_MODULES and not done:
             agent = self._agent_for_modules(modules) if modules else None
 
-        # If model returned invalid modules, fall back to heuristics
         if not done and not modules:
-            return self._heuristic_from_lists(runnable, remaining, plan)
+            fallback = self._heuristic_from_lists(
+                runnable, remaining, plan, skipped, Path(state.outdir),
+            )
+            if technique != "none":
+                fallback["technique"] = technique
+            return fallback
 
-        # Clip modules to those owned by chosen agent if agent set
         if agent and agent in AGENT_MODULES and modules:
             owned = set(AGENT_MODULES[agent])
             clipped = [m for m in modules if m in owned]
@@ -328,6 +461,7 @@ class PlannerAgent:
             "done": done,
             "next_agent": None if done else agent,
             "modules": [] if done else modules,
+            "technique": technique,
             "reasoning": str(plan.get("reasoning") or ""),
             "priority": str(plan.get("priority") or "medium"),
         }
@@ -337,25 +471,32 @@ class PlannerAgent:
         runnable: list[str],
         remaining: list[str],
         prior: dict | None = None,
+        skipped: set[str] | None = None,
+        outdir: Path | None = None,
     ) -> dict[str, Any]:
-        if not remaining:
+        signals = technique_signals(outdir) if outdir is not None else []
+        technique = signals[0] if signals else "none"
+        blocked = skipped or set()
+
+        def finished(reason: str) -> dict[str, Any]:
             return {
                 "done": True,
                 "next_agent": None,
                 "modules": [],
-                "reasoning": "All modules completed.",
-                "priority": "none",
-            }
-        if not runnable:
-            return {
-                "done": True,
-                "next_agent": None,
-                "modules": [],
-                "reasoning": "No runnable modules (blocked on prerequisites).",
+                "technique": technique,
+                "reasoning": reason,
                 "priority": "none",
             }
 
-        # Preferred order of batches
+        if not remaining:
+            return finished("All modules completed.")
+        open_mods = [m for m in runnable if m not in blocked]
+        if not runnable:
+            return finished("No runnable modules (blocked on prerequisites).")
+        if not open_mods:
+            return finished("Every runnable module is in skip_if_chosen.")
+
+        # Preferred order of batches. Skipped modules stay out of the batch.
         batches = [
             ("subdomain", ["subdomains"]),
             ("discovery", ["dns", "httpprobe"]),
@@ -366,23 +507,24 @@ class PlannerAgent:
             ("visual", ["screenshots"]),
         ]
         for agent, mods in batches:
-            pick = [m for m in mods if m in runnable]
+            pick = [m for m in mods if m in open_mods][:3]
             if pick:
                 return {
                     "done": False,
                     "next_agent": agent,
                     "modules": pick,
+                    "technique": technique,
                     "reasoning": (prior or {}).get("reasoning")
-                    or f"Heuristic next batch: {agent} → {pick}",
+                    or f"Heuristic next batch: {agent} -> {pick}",
                     "priority": "high" if agent in ("subdomain", "discovery") else "medium",
                 }
-        # any remaining runnable
-        m = runnable[0]
+        nxt = open_mods[0]
         return {
             "done": False,
-            "next_agent": self._agent_for_modules([m]),
-            "modules": [m],
-            "reasoning": f"Heuristic single-module step: {m}",
+            "next_agent": self._agent_for_modules([nxt]),
+            "modules": [nxt],
+            "technique": technique,
+            "reasoning": f"Heuristic single-module step: {nxt}",
             "priority": "low",
         }
 
@@ -392,7 +534,14 @@ class PlannerAgent:
         runnable: list[str],
         remaining: list[str],
     ) -> dict[str, Any]:
-        return self._heuristic_from_lists(runnable, remaining)
+        brief = recon_brief(state.outdir, runnable)
+        return self._heuristic_from_lists(
+            runnable,
+            remaining,
+            None,
+            skip_names(brief),
+            Path(state.outdir),
+        )
 
     @staticmethod
     def _agent_for_modules(modules: list[str]) -> str | None:
@@ -444,12 +593,14 @@ class AnalystAgent:
         user = (
             f"target: {state.target}\n"
             f"completed: {', '.join(state.completed_modules) or '-'}\n"
+            f"techniques_named: {', '.join(named_techniques(state)) or 'none'}\n"
             f"{brief}{evidence}{eval_block}\n"
             "Write five short sections: Summary, Inventory, Leads, Next, Gaps.\n"
             "Inventory repeats the counts above.\n"
             "A lead needs a host or URL copied from evidence or PRE-EVAL. Tag C0-C4. "
             "C2 needs a canary or proof already in that text. No C3.\n"
-            "Next names one /prove technique id from PRE-EVAL, or none. Do not claim it ran.\n"
+            "Next names one id from techniques_named, else one /prove technique id from PRE-EVAL, or none. "
+            "Do not claim it ran.\n"
             "Gaps names empty files that block a check."
         )
         try:

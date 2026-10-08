@@ -84,6 +84,15 @@ class ReconOrchestrator:
             self._print_plan(step_i, plan)
 
             if plan.get("done"):
+                state.add_step(AgentStep(
+                    agent="planner",
+                    modules=[],
+                    reasoning=plan.get("reasoning", ""),
+                    summary="planner finished",
+                    timestamp=_now(),
+                    success=True,
+                    details={"technique": plan.get("technique") or "none", "done": True},
+                ))
                 state.status = "completed"
                 state.save()
                 break
@@ -99,7 +108,11 @@ class ReconOrchestrator:
                     summary="[dry-run] modules not executed",
                     timestamp=_now(),
                     success=True,
-                    details={"dry_run": True, "plan": plan},
+                    details={
+                        "dry_run": True,
+                        "plan": plan,
+                        "technique": plan.get("technique") or "none",
+                    },
                 ))
                 # Simulate completion so planner can advance in dry-run demos
                 for m in modules:
@@ -132,7 +145,10 @@ class ReconOrchestrator:
                         summary="[approve] operator skipped",
                         timestamp=_now(),
                         success=True,
-                        details={"skipped": True},
+                        details={
+                            "skipped": True,
+                            "technique": plan.get("technique") or "none",
+                        },
                     ))
                     # Do not mark modules complete so planner can re-propose
                     state.save()
@@ -154,6 +170,7 @@ class ReconOrchestrator:
                     summary=f"No specialist agent for '{agent_name}'",
                     timestamp=_now(),
                     success=False,
+                    details={"technique": plan.get("technique") or "none"},
                 ))
                 state.save()
                 break
@@ -167,7 +184,10 @@ class ReconOrchestrator:
                 summary=result.summary,
                 timestamp=_now(),
                 success=result.success,
-                details={"tool_results": result.details.get("tool_results", [])},
+                details={
+                    "tool_results": result.details.get("tool_results", []),
+                    "technique": plan.get("technique") or "none",
+                },
             ))
             state.save()
             self._print_agent_result(result)
@@ -235,6 +255,7 @@ class ReconOrchestrator:
         print(f"\n--- Step {step_i}: PLANNER ---")
         print(f"  done={plan.get('done')}  priority={plan.get('priority')}")
         print(f"  next_agent={plan.get('next_agent')}  modules={plan.get('modules')}")
+        print(f"  technique={plan.get('technique') or 'none'}")
         reasoning = (plan.get("reasoning") or "").strip()
         if reasoning:
             # keep console readable

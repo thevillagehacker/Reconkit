@@ -106,6 +106,152 @@ def test_planner_user_is_counts_not_a_dump(tmp: Path):
     assert '"done":false' in system
 
 
+class _PlanModel:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = 0
+        self.user = ""
+
+    def chat_json(self, messages, temperature=0.1):
+        self.calls += 1
+        self.user = messages[1]["content"]
+        if isinstance(self.payload, Exception):
+            raise self.payload
+        return dict(self.payload)
+
+
+def test_first_step_asks_the_model(tmp: Path):
+    from agents.specialists import PlannerAgent
+    from agents.state import ReconState
+
+    model = _PlanModel({
+        "done": True,
+        "modules": [],
+        "technique": "xss_reflect",
+        "reasoning": "stop",
+        "priority": "low",
+    })
+    state = ReconState(target="example.com", outdir=str(tmp))
+    plan = PlannerAgent(model).plan(state, ["subdomains", "dns", "httpprobe"])
+    assert model.calls == 1
+    assert "last_step: none" in model.user
+    assert "technique_signals:" in model.user
+    assert "history" not in model.user
+    assert plan["done"] is False
+    assert plan["modules"] == ["subdomains"]
+    assert plan["technique"] == "none"
+
+
+def test_technique_must_match_a_file(tmp: Path):
+    from agents.specialists import PlannerAgent
+    from agents.state import ReconState
+
+    (tmp / "subdomains.txt").write_text("a.example.com\n", encoding="utf-8")
+    (tmp / "alive.txt").write_text("https://a.example.com\n", encoding="utf-8")
+    (tmp / "urls.txt").write_text("https://a.example.com/?q=1\n", encoding="utf-8")
+    (tmp / "xss_reflected_params.txt").write_text(
+        "https://a.example.com/?q=1\n", encoding="utf-8"
+    )
+    (tmp / "gf_sqli.txt").write_text("https://a.example.com/?id=1\n", encoding="utf-8")
+    state = ReconState(target="example.com", outdir=str(tmp))
+    state.completed_modules = ["subdomains", "dns", "httpprobe", "crawl"]
+    runnable = ["xss", "sqli", "nuclei"]
+
+    rejected = _PlanModel({
+        "done": False,
+        "next_agent": "vuln",
+        "modules": ["xss"],
+        "technique": "takeover_fingerprint",
+        "reasoning": "xss file",
+        "priority": "high",
+    })
+    plan = PlannerAgent(rejected).plan(state, state.completed_modules + runnable)
+    assert plan["modules"] == ["xss"]
+    assert plan["technique"] == "none"
+
+    accepted = _PlanModel({
+        "done": False,
+        "next_agent": "vuln",
+        "modules": ["xss", "sqli", "nuclei", "cloud"],
+        "technique": "xss_reflect",
+        "reasoning": "reflection file",
+        "priority": "high",
+    })
+    plan = PlannerAgent(accepted).plan(state, state.completed_modules + runnable)
+    assert plan["modules"] == ["xss", "sqli", "nuclei"]
+    assert plan["technique"] == "xss_reflect"
+    assert "sqli_boolean" not in accepted.user
+
+
+def test_skipped_module_is_not_scheduled(tmp: Path):
+    from agents.specialists import PlannerAgent
+    from agents.state import ReconState
+
+    (tmp / "subdomains.txt").write_text("a.example.com\n", encoding="utf-8")
+    (tmp / "alive.txt").write_text("https://a.example.com\n", encoding="utf-8")
+    state = ReconState(target="example.com", outdir=str(tmp))
+    state.completed_modules = ["subdomains", "httpprobe", "crawl"]
+    model = _PlanModel({
+        "done": False,
+        "next_agent": "vuln",
+        "modules": ["xss"],
+        "technique": "none",
+        "reasoning": "try xss",
+        "priority": "medium",
+    })
+    plan = PlannerAgent(model).plan(
+        state, ["subdomains", "httpprobe", "crawl", "xss", "nuclei"]
+    )
+    assert "xss" not in plan["modules"]
+    assert plan["modules"] == ["nuclei"]
+
+
+def test_fallback_stops_when_only_skipped_modules_remain(tmp: Path):
+    from agents.specialists import PlannerAgent
+    from agents.state import ReconState
+
+    (tmp / "subdomains.txt").write_text("a.example.com\n", encoding="utf-8")
+    state = ReconState(target="example.com", outdir=str(tmp))
+    state.completed_modules = ["subdomains", "httpprobe", "crawl"]
+    model = _PlanModel(RuntimeError("down"))
+    plan = PlannerAgent(model).plan(state, ["subdomains", "httpprobe", "crawl", "xss"])
+    assert model.calls == 1
+    assert plan["done"] is True
+    assert plan["modules"] == []
+    assert plan["technique"] == "none"
+
+
+def test_last_step_counts_reach_the_next_plan(tmp: Path):
+    from agents.specialists import planner_user
+    from agents.state import ReconState
+
+    state = ReconState(target="example.com", outdir=str(tmp))
+    state.completed_modules = ["subdomains", "dns"]
+    state.history = [{
+        "agent": "discovery",
+        "modules": ["dns"],
+        "summary": "next: httpprobe because resolved.txt=2",
+        "details": {
+            "technique": "none",
+            "tool_results": [{
+                "module": "dns",
+                "success": True,
+                "outputs": [{
+                    "path": "dns_records.txt",
+                    "exists": True,
+                    "lines": 2,
+                    "preview": "SECRETPREVIEW should not enter the prompt",
+                }],
+            }],
+        },
+    }]
+    user = planner_user(state, ["httpprobe"])
+    assert "last_step: modules=dns technique=none" in user
+    assert "dns_records.txt=2" in user
+    assert "SECRETPREVIEW" not in user
+    assert "history" not in user
+
+
 def test_tool_lines_drop_previews():
     from agents.specialists import tool_result_lines
 
@@ -188,6 +334,16 @@ if __name__ == "__main__":
         test_nuclei_head_keeps_severity_lines(Path(directory))
     with tempfile.TemporaryDirectory() as directory:
         test_planner_user_is_counts_not_a_dump(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_first_step_asks_the_model(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_technique_must_match_a_file(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_skipped_module_is_not_scheduled(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_fallback_stops_when_only_skipped_modules_remain(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_last_step_counts_reach_the_next_plan(Path(directory))
     test_tool_lines_drop_previews()
     with tempfile.TemporaryDirectory() as directory:
         test_evidence_is_a_short_head(Path(directory))
