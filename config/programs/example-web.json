@@ -27,5 +27,5 @@
     "low": 0.85,
     "info": 0.7
   },
-  "notes": "Activate with: /program set example-web  or  RECON_PROGRAM=example-web"
+  "notes": "Activate with: python recon.py program set example-web  or  RECON_PROGRAM=example-web"
 }

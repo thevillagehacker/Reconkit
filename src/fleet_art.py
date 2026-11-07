@@ -5,9 +5,9 @@ from __future__ import annotations
 CYBER_BANNER = "authorized reconnaissance  ·  detection and safe validation"
 
 CYBER_SCAN_LINES = [
-    ("/help", "command list"),
-    ("/run <target>", "scan a host already in scope"),
-    ("/modules", "what each stage writes"),
+    ("python recon.py", "command list"),
+    ("python recon.py <target>", "scan a host already in scope"),
+    ("python recon.py modules", "what each stage writes"),
 ]
 
 FLAGSHIP = ""

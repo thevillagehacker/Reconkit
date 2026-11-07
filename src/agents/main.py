@@ -215,7 +215,7 @@ def _build_agent_config(args) -> object:
 
 
 def cmd_agents(_args) -> None:
-    print("Specialist agents\n" + "-" * 40)
+    print("[*] Specialist agents")
     for name, mods in AGENT_MODULES.items():
         print(f"  {name:12}  modules: {', '.join(mods)}")
     print("\nAlso: planner (decides next step), analyst (final report)")
@@ -223,7 +223,7 @@ def cmd_agents(_args) -> None:
         from agents.skills import skill_status
 
         st = skill_status()
-        print("\nAgent skill\n" + "-" * 40)
+        print("\n[*] Agent skill")
         if st.get("enabled"):
             print(f"  primary: {st.get('name')}")
             print(f"  path:    {st.get('path')}")
@@ -258,7 +258,7 @@ def cmd_agents(_args) -> None:
 
 def cmd_modules(_args) -> None:
     descs = module_descriptions()
-    print("reconkit modules available to agents\n" + "-" * 40)
+    print("[*] reconkit modules available to agents")
     for m in list_modules():
         print(f"  {m:12}  {descs.get(m, '')}")
 
@@ -266,7 +266,7 @@ def cmd_modules(_args) -> None:
 def cmd_providers(_args) -> None:
     from agents.llm import list_providers
 
-    print("Supported LLM providers (local + cloud)\n" + "-" * 60)
+    print("[*] Supported LLM providers (local + cloud)")
     print(f"  {'provider':12} {'api':10} {'default_model':36} key_env")
     print(f"  {'--------':12} {'---':10} {'-------------':36} -------")
     for p in list_providers():

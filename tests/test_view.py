@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from shell.view import load_snapshot  # noqa: E402
+from scan_view import load_snapshot  # noqa: E402
 
 
 def test_saved_output_counts(tmp: Path) -> None:

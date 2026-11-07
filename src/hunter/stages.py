@@ -64,6 +64,25 @@ def _headers_httpx() -> list[str]:
     return sess.httpx_h_flags()
 
 
+def _http_bases(rk, outdir: Path, limit: int) -> list[str]:
+    """Live http(s) URLs from alive.txt. alive_urls.txt is used when that is the only list."""
+    for name in ("alive.txt", "alive_urls.txt"):
+        path = outdir / name
+        try:
+            if not path.is_file() or path.stat().st_size == 0:
+                continue
+        except OSError:
+            continue
+        bases = [
+            str(tok).rstrip("/")
+            for tok in rk._first_tokens(path)
+            if str(tok).startswith("http")
+        ]
+        if bases:
+            return bases[:limit]
+    return []
+
+
 def _write(rk, path: Path, lines) -> int:
     text = "\n".join(str(x).strip() for x in lines if str(x).strip())
     path.write_text(text + ("\n" if text else ""), encoding="utf-8")
@@ -228,7 +247,6 @@ def stage_ports(target: str, outdir: Path) -> None:
             )
         text = rk.strip_ansi(extra.decode("utf-8", errors="replace"))
         rk.write_utf8(outdir / "ports_http.txt", text + ("" if not text or text.endswith("\n") else "\n"))
-        rk.save_tool_raw(outdir, "ports", "httpx", text)
         rk.ok(f"ports: {len(kept)} open, {len(http_ports)} http-ish → ports_http.txt")
     else:
         rk.ok(f"ports: {len(kept)} open services → ports.txt")
@@ -262,6 +280,7 @@ def stage_wellknown(target: str, outdir: Path, alive_file: Path) -> None:
         return
     hits = [ln for ln in blob.decode(errors="ignore").splitlines() if ln.strip()]
     n = _write(rk, dest, hits)
+    rk.release_tool_body(outdir, "wellknown", "httpx")
     rk.ok(f"well-known hits: {n} → wellknown.txt")
 
 
@@ -334,13 +353,7 @@ def stage_apis(target: str, outdir: Path, urls_file: Path) -> None:
     p = outdir / "api_paths.txt"
     if p.exists():
         extra = [ln.strip() for ln in p.read_text(errors="ignore").splitlines() if ln.strip()]
-    bases: list[str] = []
-    alive = outdir / "alive_urls.txt"
-    if alive.exists():
-        bases = [
-            b.rstrip("/") for b in rk._first_tokens(alive)[:15]
-            if str(b).startswith("http")
-        ]
+    bases = _http_bases(rk, outdir, 15)
     for path in extra:
         if not path.startswith("/"):
             path = "/" + path
@@ -484,12 +497,8 @@ def stage_graphql(target: str, outdir: Path, urls_file: Path) -> None:
         urls = [ln.strip() for ln in urls_file.read_text(errors="ignore").splitlines() if ln.strip()]
     gq = [u for u in urls if rk.url_belongs_to_target(u, target) and "graphql" in u.lower()]
     # well-known
-    alive = outdir / "alive_urls.txt"
-    if alive.exists():
-        for base in rk._first_tokens(alive)[:10]:
-            if not base.startswith("http"):
-                continue
-            gq.append(base.rstrip("/") + "/graphql")
+    for base in _http_bases(rk, outdir, 10):
+        gq.append(base + "/graphql")
     gq = sorted(set(gq))[:40]
     hits = []
     q = '{"query":"{__typename}"}'

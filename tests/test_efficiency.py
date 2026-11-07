@@ -206,8 +206,12 @@ def test_dns_is_one_pass_and_drops_unresolved_guesses(tmp: Path):
     assert "guess.example.com" not in subs
     cname = (tmp / "cname_takeover_candidates.txt").read_text(encoding="utf-8")
     assert "github.io" in cname
-    assert (tmp / "tools" / "dns" / "dnsx-resolved.txt").is_file()
-    assert (tmp / "tools" / "dns" / "dnsx-cname.txt").is_file()
+    records = (tmp / "dns_records.txt").read_text(encoding="utf-8")
+    assert "a.example.com" in records
+    assert "dev.example.com" in records
+    assert not (tmp / "tools" / "dns" / "dnsx-records.txt").exists()
+    assert not (tmp / "tools" / "dns" / "dnsx-resolved.txt").exists()
+    assert not (tmp / "tools" / "dns" / "dnsx-cname.txt").exists()
 
 
 def test_gf_buckets_are_reused(tmp: Path):
@@ -248,7 +252,8 @@ def test_gf_buckets_are_reused(tmp: Path):
         )
         assert used is True
         assert b"a.example.com" in data
-        assert (tmp / "tools" / "xss" / "gf.txt").is_file()
+        assert not (tmp / "tools" / "xss" / "gf.txt").exists()
+        assert not (tmp / "tools" / "gf" / "xss.txt").exists()
         assert len(calls) == done
     finally:
         rk.which = orig_which

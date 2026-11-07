@@ -4,7 +4,7 @@
   python recon.py example.com
   python recon.py example.com --modules dns,httpprobe
   python recon.py example.com --resume
-  python recon.py shell
+  python recon.py playbook list
 
 The target must already be in ~/.reconkit/scope.txt.
 """
@@ -36,7 +36,10 @@ Setup:
 Results:
   python recon.py findings <target>
   python recon.py prove <target>
-  python recon.py shell
+  python recon.py notable --target <target>
+  python recon.py playbook list
+  python recon.py rate stealth
+  python recon.py set RECON_AMASS_TIMEOUT 900
   python recon.py view <target>
 
 Agents:
@@ -59,10 +62,22 @@ COMMANDS = {
     "run",
     "modules",
     "keys",
-    "shell",
     "view",
     "findings",
     "prove",
+    "notable",
+    "diff",
+    "report",
+    "playbook",
+    "rate",
+    "set",
+    "doctor",
+    "tips",
+    "critic",
+    "eval",
+    "inbox",
+    "program",
+    "graph",
     "session",
     "har",
     "evidence",
@@ -180,7 +195,7 @@ def normalize_recon(args: list[str]) -> list[str] | None:
         if len(tail) == 1 and looks_like_target(tail[0]):
             return ["findings", "summary", tail[0]]
         return args
-    if command in {"shell", "view"}:
+    if command == "view":
         tail = args[1:]
         if tail and looks_like_target(tail[0]) and "--target" not in tail:
             return [command, "--target", tail[0], *tail[1:]]

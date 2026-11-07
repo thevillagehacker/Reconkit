@@ -37,8 +37,8 @@ _DEFAULT_TECHNIQUES = (
     "idor_session_diff",
 )
 
-# Merged filenames for a phase. Tool files under tools/<phase>/ are preferred.
-# Kept here so the scan path does not import the dashboard.
+# Root files for a phase. When any of these exist, the review reads them and
+# skips tools/<phase>/ so the same hosts are not excerpted twice.
 _PHASE_MERGED: dict[str, tuple[str, ...]] = {
     "subdomains": ("subdomains.txt",),
     "permute": ("permute_raw.txt", "permute_resolved.txt"),
@@ -51,7 +51,6 @@ _PHASE_MERGED: dict[str, tuple[str, ...]] = {
     "ports": ("ports.txt", "ports_http.txt"),
     "httpprobe": (
         "alive.txt",
-        "alive_urls.txt",
         "waf_detected.txt",
         "wildcard_http_dropped.txt",
     ),
@@ -556,36 +555,14 @@ def _collect(
     phase: str,
 ) -> tuple[list[_Sample], list[str], int, int, list[tuple[str, str]]]:
     root = Path(outdir)
-    chosen: list[Path] = []
-    names: set[str] = set()
-    tool_root = root / "tools" / phase
-    tool_files: list[Path] = []
-    if tool_root.is_dir() and _inside(root, tool_root):
-        for path in sorted(tool_root.iterdir()):
-            if not path.is_file() or path.name == "dropped.txt":
-                continue
-            if path.name.endswith(".tmp"):
-                continue
-            if not _inside(root, path):
-                continue
-            tool_files.append(path)
-    for path in tool_files[:_MAX_TOOL_FILES]:
-        chosen.append(path)
-        names.add(path.name)
-    merged: list[Path] = []
-    for name in _PHASE_MERGED.get(phase, ()):
-        path = root / name
-        if path.is_file() and path.name not in names and _inside(root, path):
-            merged.append(path)
-    if phase == "nuclei":
-        for path in sorted(root.glob("nuclei_*.txt")):
-            if path.is_file() and path.name not in names and _inside(root, path):
-                merged.append(path)
-    extra = merged[:_MAX_MERGED]
-    for path in extra:
-        names.add(path.name)
-    chosen.extend(extra)
-    omitted = max(0, len(tool_files) - _MAX_TOOL_FILES) + max(0, len(merged) - _MAX_MERGED)
+    tool_files = _phase_tool_files(root, phase)
+    merged = _phase_merged_files(root, phase)
+    if merged:
+        chosen = merged[:_MAX_MERGED]
+        omitted = max(0, len(merged) - _MAX_MERGED)
+    else:
+        chosen = tool_files[:_MAX_TOOL_FILES]
+        omitted = max(0, len(tool_files) - _MAX_TOOL_FILES)
     samples = [_sample(root, path) for path in chosen]
     dropped_count, dropped_lines = _dropped(root, phase)
     context: list[tuple[str, str]] = []
@@ -668,21 +645,40 @@ def _review_is_fresh(outdir: Path, phase: str) -> bool:
     return review_m >= newest
 
 
-def _input_paths(outdir: Path, phase: str) -> list[Path]:
-    root = Path(outdir)
-    found: list[Path] = []
+def _phase_tool_files(root: Path, phase: str) -> list[Path]:
     tool_root = root / "tools" / phase
-    if tool_root.is_dir():
-        for path in tool_root.iterdir():
-            if path.is_file() and path.name != "dropped.txt":
-                found.append(path)
+    found: list[Path] = []
+    if not tool_root.is_dir() or not _inside(root, tool_root):
+        return found
+    for path in sorted(tool_root.iterdir()):
+        if not path.is_file() or path.name == "dropped.txt":
+            continue
+        if path.name.endswith(".tmp") or path.name.endswith(".rc"):
+            continue
+        if _inside(root, path):
+            found.append(path)
+    return found
+
+
+def _phase_merged_files(root: Path, phase: str) -> list[Path]:
+    merged: list[Path] = []
     for name in _PHASE_MERGED.get(phase, ()):
         path = root / name
-        if path.is_file():
-            found.append(path)
+        if path.is_file() and _inside(root, path):
+            merged.append(path)
     if phase == "nuclei":
-        found.extend(p for p in root.glob("nuclei_*.txt") if p.is_file())
-    return found
+        for path in sorted(root.glob("nuclei_*.txt")):
+            if path.is_file() and path not in merged and _inside(root, path):
+                merged.append(path)
+    return merged
+
+
+def _input_paths(outdir: Path, phase: str) -> list[Path]:
+    root = Path(outdir)
+    merged = _phase_merged_files(root, phase)
+    if merged:
+        return merged
+    return _phase_tool_files(root, phase)
 
 
 def _split_phase(text: str, allowed: list[str]) -> tuple[str, str, str, str, list[str]]:
@@ -728,8 +724,10 @@ def _prove_commands(names: list[str], target: str) -> list[str]:
         return ["none"]
     if not target:
         return list(names)
-    lines = [f"/prove queue {target}"]
-    lines.extend(f"/prove run {target} --technique {name}" for name in names)
+    lines = [f"python recon.py prove queue {target}"]
+    lines.extend(
+        f"python recon.py prove run --target {target} --technique {name}" for name in names
+    )
     return lines
 
 

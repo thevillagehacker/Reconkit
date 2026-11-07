@@ -168,8 +168,8 @@ def test_summary_commands_stay_inside_prove(tmp: Path):
     text = path.read_text(encoding="utf-8")
     assert "sqlmap" not in text.lower()
     assert "look at reflected" in text
-    assert "/prove queue example.com" in text
-    assert "/prove run example.com --technique xss_reflect" in text
+    assert "python recon.py prove queue example.com" in text
+    assert "python recon.py prove run --target example.com --technique xss_reflect" in text
 
     bad = write_summary(tmp, "example.com;id", chat=chat)
     assert bad is not None
@@ -251,7 +251,6 @@ def test_review_flag_stays_on_its_thread():
 def test_env_roundtrip_and_flags(tmp: Path):
     from agents.supervisor import pop_supervisor, push_supervisor, supervisor_enabled
     import reconkit as rk
-    from shell.repl import ReconShell
 
     with env(RECON_SUPERVISOR=None):
         prev = push_supervisor(True)
@@ -269,13 +268,8 @@ def test_env_roundtrip_and_flags(tmp: Path):
     assert parser.parse_args(["run", "--target", "example.com", "--review"]).review is True
     assert parser.parse_args(["run", "--target", "example.com", "--supervisor"]).review is True
     assert parser.parse_args(["run", "--target", "example.com"]).review is False
-
-    shell = ReconShell(verbose=0, intro=False, target="example.com")
-    parsed = shell._parse_run_args(["example.com", "--review", "--modules", "dns", "--fg"])
-    assert parsed[0] == "example.com"
-    assert parsed[1] == "dns"
-    assert parsed[6] is True
-    assert shell._parse_run_args(["--supervisor"])[6] is True
+    play = parser.parse_args(["playbook", "run", "quick", "--target", "example.com", "--review"])
+    assert play.name == "quick" and play.target == "example.com" and play.review is True
 
     with env(RECON_SUPERVISOR="1"):
         rk.write_run_meta(tmp, "example.com", ["dns"])

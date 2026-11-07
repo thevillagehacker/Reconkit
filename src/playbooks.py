@@ -45,8 +45,8 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
     },
     "auth-surface": {
         "description": (
-            "Authenticated recon (set /session first): crawl + JS intel + APIs + 403 bypass. "
-            "Then /prove run --technique idor_session_diff after cookie-B is set."
+            "Authenticated recon (python recon.py session set first): crawl + JS intel + APIs + 403 bypass. "
+            "Then python recon.py prove run --target <host> --technique idor_session_diff after cookie-B is set."
         ),
         "modules": ["httpprobe", "crawl", "js", "jsintel", "apis", "bypass403"],
     },
@@ -60,8 +60,8 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
     },
     "prove-prep": {
         "description": (
-            "Detection surface for later /prove: crawl + xss + sqli + ssrf_ssti + "
-            "redirect/cors/graphql + nuclei + cloud. Then: /findings reindex && /prove queue && /prove run"
+            "Detection surface for later prove: crawl + xss + sqli + ssrf_ssti + "
+            "redirect/cors/graphql + nuclei + cloud. Then findings reindex, prove queue, and prove run."
         ),
         "modules": [
             "httpprobe", "crawl", "xss", "sqli", "ssrf_ssti",

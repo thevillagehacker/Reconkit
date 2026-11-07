@@ -101,7 +101,7 @@ class RunControl:
         n += self.kill_known_tools()
         try:
             from live_mission import mark_stopped
-            mark_stopped("stopped by operator (/stop)")
+            mark_stopped("stopped by operator")
         except Exception:
             pass
         return n

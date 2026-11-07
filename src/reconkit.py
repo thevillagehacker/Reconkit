@@ -22,12 +22,10 @@ COMMANDS
   wordlist-target         Build a target-specific wordlist from crawl/params
   modules             List available recon modules
   prove …             Safe validation (queue/run) — also: python recon.py prove
-
-INTERACTIVE SHELL
------------------
-  python recon.py shell          # cyber-themed prompt (preferred in v3.0.0)
-  python recon.py shell       # same shell, launched from reconkit
-  python recon.py prove run --target <domain>
+  playbook list|run   Named module workflows
+  notable / diff / report / graph / inbox / program
+  rate / set          Scan speed and per-tool time caps
+  doctor / tips / eval / critic
 
 VERBOSITY
 ---------
@@ -74,7 +72,9 @@ USAGE EXAMPLES
     python recon.py -v 3 run --target example.com --modules subdomains
     python recon.py prove queue --target example.com
     python recon.py prove run --target example.com --dry-run
-    python recon.py shell
+    python recon.py playbook run quick --target example.com
+    python recon.py rate stealth
+    python recon.py set RECON_AMASS_TIMEOUT 900
 """
 
 __version__ = "3.0.0"
@@ -797,11 +797,22 @@ Colors.enabled = _supports_color()
 # Small helpers
 # --------------------------------------------------------------------------- #
 
+def _tag(mark: str, msg: str, *codes: str) -> str:
+    return f"{_c(mark, *codes)} {msg}"
+
+
 def banner(text: str) -> None:
-    line = "═" * 72
-    print("\n" + _c(line, Colors.ORANGE if hasattr(Colors, "ORANGE") else Colors.BOLD_RED))
-    print(_c("  ◈  " + text, Colors.BOLD, Colors.BRIGHT_CYAN))
-    print(_c(line, Colors.ORANGE if hasattr(Colors, "ORANGE") else Colors.BOLD_RED))
+    print(_tag("[*]", text, Colors.BOLD, Colors.BRIGHT_CYAN))
+
+
+def _hud_print(text: str) -> None:
+    """Print under the scan HUD so a spinner row is closed first."""
+    try:
+        from progress_ui import hud_print
+    except Exception:
+        print(text)
+        return
+    hud_print(text)
 
 
 def ok(msg: str) -> None:
@@ -826,15 +837,15 @@ def ok(msg: str) -> None:
         )
         if not keep:
             return
-    print(f"{_c('[OK]', Colors.BOLD_GREEN)}   {msg}")
+    _hud_print(_tag("[+]", msg, Colors.BOLD_GREEN))
 
 
 def warn(msg: str) -> None:
-    print(f"{_c('[WARN]', Colors.YELLOW)} ⚠  {msg}")
+    _hud_print(_tag("[!]", msg, Colors.YELLOW))
 
 
 def fail(msg: str) -> None:
-    print(f"{_c('[FAIL]', Colors.BOLD_RED)} ❌ {msg}")
+    _hud_print(_tag("[-]", msg, Colors.BOLD_RED))
 
 
 def step(msg: str, phase: str | None = None) -> None:
@@ -863,7 +874,7 @@ def step(msg: str, phase: str | None = None) -> None:
     try:
         from progress_ui import phase_banner, PHASE_TITLE
     except Exception:
-        print(f"\n{_c('--->', Colors.BOLD_CYAN)} {_c(msg, Colors.BOLD)}")
+        print(_tag("[*]", msg, Colors.BOLD, Colors.BRIGHT_CYAN))
         return
     phase_banner(key if key in PHASE_TITLE or key in (
         "subdomains", "dns", "httpprobe", "tls", "crawl", "js", "params",
@@ -882,7 +893,7 @@ def info(msg: str) -> None:
         from progress_ui import scan_log
         scan_log(msg, level="INF", frame=int(time.time() * 10) % 20, verbose=VERBOSE)
     except Exception:
-        print(f"{_c('[INFO]', Colors.BRIGHT_BLUE)}  ℹ  {msg}")
+        print(_tag("[*]", msg, Colors.BRIGHT_BLUE))
 
 
 # --------------------------------------------------------------------------- #
@@ -938,7 +949,7 @@ def verbose_at(level: int) -> bool:
 def vprint(msg: str, min_level: int = VERBOSE_NORMAL) -> None:
     """Print only when current VERBOSE >= min_level."""
     if VERBOSE >= min_level:
-        print(msg)
+        _hud_print(msg)
 
 
 def debug(msg: str) -> None:
@@ -947,7 +958,7 @@ def debug(msg: str) -> None:
     if VERBOSE < VERBOSE_DEBUG:
         return
     for line in msg.splitlines() or [""]:
-        print(f"{_c('[DEBUG]', Colors.BRIGHT_MAGENTA)} {line}")
+        _hud_print(f"{_c('[DEBUG]', Colors.BRIGHT_MAGENTA)} {line}")
 
 
 def live(msg: str) -> None:
@@ -955,7 +966,7 @@ def live(msg: str) -> None:
     if VERBOSE < VERBOSE_LIVE:
         return
     for line in msg.splitlines() or [""]:
-        print(f"{_c('[LIVE]', Colors.NEON_GREEN)} {line}")
+        _hud_print(f"{_c('[LIVE]', Colors.NEON_GREEN)} {line}")
 
 
 def _preview_lines(data: bytes, n: int = 5) -> str:
@@ -967,6 +978,87 @@ def _preview_lines(data: bytes, n: int = 5) -> str:
     return text or "      (empty)"
 
 
+_SECRET_FLAGS = frozenset({
+    "-key", "--key", "--token", "--api-key", "--apikey", "-api-key",
+    "--auth-token", "--authorization",
+})
+_COOKIE_FLAGS = frozenset({"-b", "--cookie", "--cookie-string"})
+_HEADER_FLAGS = frozenset({"-H", "--header"})
+_SENSITIVE_HEADERS = frozenset({
+    "authorization", "cookie", "x-api-key", "api-key", "x-auth-token",
+})
+
+
+def _secret_values() -> set[str]:
+    """Secret strings currently in the environment. Values stay out of logs."""
+    found: set[str] = set()
+    for name, val in os.environ.items():
+        if not val or len(val) < 12:
+            continue
+        upper = name.upper()
+        if upper.endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")) or "API_KEY" in upper:
+            found.add(val)
+    return found
+
+
+def _scrub_secrets(text: str, secrets: set[str] | None = None) -> str:
+    if not text:
+        return text
+    out = text
+    for secret in secrets if secrets is not None else _secret_values():
+        if secret and secret in out:
+            out = out.replace(secret, "<redacted>")
+    return out
+
+
+def _redact_header(value: str) -> str:
+    if ":" in value:
+        name, _rest = value.split(":", 1)
+        return f"{name}: <redacted>"
+    return "<redacted>"
+
+
+def redact_cmd(cmd: list) -> str:
+    """One command line safe to print or store. Key material becomes <redacted>."""
+    secrets = _secret_values()
+    shown: list[str] = []
+    hide_next = False
+    hide_header = False
+    for c in cmd:
+        s = str(c)
+        if hide_next:
+            shown.append("<redacted>")
+            hide_next = False
+            continue
+        if hide_header:
+            hide_header = False
+            head = s.split(":", 1)[0].strip().lower()
+            if head in _SENSITIVE_HEADERS:
+                shown.append(_redact_header(s))
+                continue
+            shown.append(_scrub_secrets(s, secrets))
+            continue
+        flag = s
+        inline = None
+        if "=" in s:
+            flag, inline = s.split("=", 1)
+        flag_name = flag.lower() if flag.startswith("--") else flag
+        if flag_name in _SECRET_FLAGS and inline is not None:
+            shown.append(f"{flag}=<redacted>")
+            continue
+        token = s.lower() if s.startswith("--") else s
+        if token in _SECRET_FLAGS or token in _COOKIE_FLAGS:
+            shown.append(s)
+            hide_next = True
+            continue
+        if token in _HEADER_FLAGS:
+            shown.append(s)
+            hide_header = True
+            continue
+        shown.append(_scrub_secrets(s, secrets))
+    return " ".join(shown)
+
+
 def _echo_cmd(cmd: list) -> None:
     # Suppress command echo while live HUD is painting (prevents progress spam)
     try:
@@ -976,20 +1068,7 @@ def _echo_cmd(cmd: list) -> None:
     except Exception:
         pass
     if VERBOSE >= VERBOSE_NORMAL:
-        shown: list[str] = []
-        hide_next = False
-        for c in cmd:
-            s = str(c)
-            if hide_next:
-                shown.append("<redacted>")
-                hide_next = False
-                continue
-            if s in ("-key", "--key", "--token", "--api-key"):
-                shown.append(s)
-                hide_next = True
-                continue
-            shown.append(s)
-        print(_c(f"    $ {' '.join(shown)}", Colors.GRAY))
+        _hud_print(_c(f"    $ {redact_cmd(cmd)}", Colors.GRAY))
 
 
 def which(binary: str) -> str | None:
@@ -1193,9 +1272,9 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
                     on_stdout=on_stdout,
                 )
             elapsed = time.time() - t0
-            err = result.stderr.decode(errors="ignore") if result.stderr else ""
+            err = _scrub_secrets(result.stderr.decode(errors="ignore") if result.stderr else "")
             _append_debug_log(
-                f"\n$ {' '.join(str(c) for c in cmd)}  "
+                f"\n$ {redact_cmd(cmd)}  "
                 f"(exit={result.returncode}, {elapsed:.1f}s)\n{err}"
             )
 
@@ -1203,8 +1282,11 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
                   f"stdout={len(result.stdout or b'')}B  stderr={len(result.stderr or b'')}B")
             if result.stderr and result.stderr.strip():
                 if VERBOSE < VERBOSE_LIVE:
-                    debug("stderr:\n" + "\n".join(f"      {ln}" for ln in
-                                                   result.stderr.decode(errors="ignore").splitlines()[:15]))
+                    debug("stderr:\n" + "\n".join(
+                        f"      {ln}" for ln in _scrub_secrets(
+                            result.stderr.decode(errors="ignore")
+                        ).splitlines()[:15]
+                    ))
             if result.stdout and VERBOSE < VERBOSE_LIVE:
                 debug("stdout preview:\n" + _preview_lines(result.stdout))
             return result
@@ -1217,7 +1299,7 @@ def run(cmd: list[str], check: bool = False, env: dict | None = None,
         debug(f"exit={result.returncode}  time={elapsed:.1f}s  (live output above, not captured)")
         return result
     except RunStopped:
-        warn("command interrupted by /stop")
+        warn("command interrupted")
         raise
 
 
@@ -1267,6 +1349,7 @@ def pipeline(
     input_data: bytes = b"",
     timeout: float | None = None,
     on_stdout=None,
+    echo: bool = True,
 ) -> bytes:
     """Chain a list of argv commands, piping stdout->stdin, like a shell pipe
     but without invoking a shell (no injection risk from target strings).
@@ -1277,6 +1360,7 @@ def pipeline(
     a half-built payload into the next tool (that would poison result files).
     `on_stdout` receives raw chunks from the last command only, while it runs.
     The exit code is stored on this thread (`_LAST_PIPE_RC`).
+    `echo=False` skips the `$` line for an internal check.
     """
     from run_control import CONTROL, RunStopped, run_interruptible
 
@@ -1297,7 +1381,8 @@ def pipeline(
             _LAST_PIPE_RC.set(127)
             return b""
         full_cmd = [binary] + cmd[1:]
-        _echo_cmd(full_cmd)
+        if echo:
+            _echo_cmd(full_cmd)
         t0 = time.time()
         try:
             proc = run_interruptible(
@@ -1309,9 +1394,9 @@ def pipeline(
             raise
         elapsed = time.time() - t0
         _LAST_PIPE_RC.set(proc.returncode if proc.returncode is not None else -1)
-        err = proc.stderr.decode(errors="ignore") if proc.stderr else ""
+        err = _scrub_secrets(proc.stderr.decode(errors="ignore") if proc.stderr else "")
         _append_debug_log(
-            f"\n$ {' '.join(str(c) for c in full_cmd)} (piped, "
+            f"\n$ {redact_cmd(full_cmd)} (piped, "
             f"exit={proc.returncode}, {elapsed:.1f}s)\n{err}"
         )
 
@@ -1448,7 +1533,7 @@ _PARAM_HINTS = (
     "email", "doc", "page", "folder", "img", "image", "cmd", "exec", "debug",
 )
 
-# Tech string seen in httpx/js output -> existing /prove technique. No new attacks.
+# Tech string seen in httpx/js output -> existing prove technique. No new attacks.
 _TECH_PROVE = (
     ("graphql", "graphql_typename"),
     ("jenkins", "nuclei_recheck"),
@@ -1469,6 +1554,87 @@ def tool_cap(key: str) -> float:
     except (TypeError, ValueError):
         val = default
     return float(max(lo, min(val, hi)))
+
+
+def timeout_rows() -> list[tuple[str, int, int, int]]:
+    """(env, default, minimum, maximum). Amass first, then the tool families."""
+    rows = [("RECON_AMASS_TIMEOUT", 180, 30, 900)]
+    for env, default, lo, hi in _TOOL_CAPS.values():
+        rows.append((env, default, lo, hi))
+    return rows
+
+
+def _timeout_index() -> dict[str, tuple[int, int, int]]:
+    return {env: (default, lo, hi) for env, default, lo, hi in timeout_rows()}
+
+
+def current_tool_timeout(name: str) -> int:
+    """Clamped seconds currently in effect for one known timeout."""
+    key = (name or "").strip().upper()
+    spec = _timeout_index().get(key)
+    if spec is None:
+        raise ValueError(f"Unknown timeout '{name}'. python recon.py set lists the names.")
+    default, lo, hi = spec
+    try:
+        val = int(os.environ.get(key) or default)
+    except (TypeError, ValueError):
+        val = default
+    return max(lo, min(val, hi))
+
+
+def _persist_timeout(name: str, seconds: int) -> None:
+    """Merge one cap into timeouts in ~/.reconkit/config.json. Best effort."""
+    ensure_dirs()
+    try:
+        existing: dict = {}
+        if CONFIG_FILE.exists():
+            loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+            if isinstance(loaded, dict):
+                existing = loaded
+        timeouts = existing.get("timeouts")
+        if not isinstance(timeouts, dict):
+            timeouts = {}
+        timeouts[name] = int(seconds)
+        existing["timeouts"] = timeouts
+        CONFIG_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def set_tool_timeout(name: str, seconds: str | int) -> tuple[str, int]:
+    """Clamp, export, and persist one known tool cap. Rejects unknown names."""
+    key = (name or "").strip().upper()
+    spec = _timeout_index().get(key)
+    if spec is None:
+        raise ValueError(f"Unknown timeout '{name}'. python recon.py set lists the names.")
+    _default, lo, hi = spec
+    try:
+        raw = int(str(seconds).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} needs a whole number of seconds ({lo}-{hi})")
+    val = max(lo, min(raw, hi))
+    os.environ[key] = str(val)
+    _persist_timeout(key, val)
+    return key, val
+
+
+def apply_saved_timeouts() -> None:
+    """Load saved caps. A variable already in the environment wins."""
+    saved = load_config().get("timeouts")
+    if not isinstance(saved, dict):
+        return
+    index = _timeout_index()
+    for name, raw in saved.items():
+        key = str(name).strip().upper()
+        spec = index.get(key)
+        if spec is None:
+            continue
+        _default, lo, hi = spec
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            continue
+        os.environ.setdefault(key, str(max(lo, min(val, hi))))
 
 
 def reset_run_bookkeeping() -> None:
@@ -1559,28 +1725,66 @@ def _tool_rc_complete(
 def tool_file_fresh(
     outdir: Path, stage: str, tool: str,
     input_path: Path | None = None, suffix: str = ".txt",
+    canonical: Path | None = None,
 ) -> bool:
+    """True when this tool finished and its result is still current.
+
+    The result is the tools/ body, or `canonical` after that body was released.
+    Exit 124 is unfinished. A missing .rc is an older finished file.
+    """
     dest = _tool_path(outdir, stage, tool, suffix)
     try:
-        if not dest.is_file() or dest.stat().st_size == 0:
-            return False
         if not _tool_rc_complete(outdir, stage, tool, suffix):
+            return False
+        body: Path | None = None
+        if dest.is_file() and dest.stat().st_size > 0:
+            body = dest
+        elif canonical is not None and canonical.is_file():
+            body = canonical
+        if body is None:
             return False
         if input_path is None or not input_path.exists():
             return True
-        return dest.stat().st_mtime + 1 >= input_path.stat().st_mtime
+        return body.stat().st_mtime + 1 >= input_path.stat().st_mtime
     except Exception:
         return False
 
 
 def should_skip_tool(
     outdir: Path, stage: str, tool: str, input_path: Path | None = None,
-    suffix: str = ".txt",
+    suffix: str = ".txt", canonical: Path | None = None,
 ) -> bool:
-    """--resume only. A finished tool file newer than its input is done."""
+    """--resume only. A finished result newer than its input is done."""
     if not resume_active():
         return False
-    return tool_file_fresh(outdir, stage, tool, input_path, suffix=suffix)
+    return tool_file_fresh(
+        outdir, stage, tool, input_path, suffix=suffix, canonical=canonical,
+    )
+
+
+def release_tool_body(
+    outdir: Path, stage: str, tool: str, suffix: str = ".txt",
+) -> None:
+    """Remove a tools/ body once the root file holds that result. The .rc stays."""
+    dest = _tool_path(outdir, stage, tool, suffix)
+    try:
+        if dest.is_file():
+            dest.unlink()
+    except Exception:
+        pass
+
+
+def drop_tool_files(
+    outdir: Path, stage: str, tool: str, suffix: str = ".txt",
+) -> None:
+    """Remove a derived tools/ body and its .rc."""
+    dest = _tool_path(outdir, stage, tool, suffix)
+    for path in (dest, _tool_rc_path(outdir, stage, tool, suffix)):
+        try:
+            if path.is_file():
+                path.unlink()
+        except Exception:
+            pass
 
 
 def resume_legacy_merge(outdir: Path, stage: str, *merges: Path) -> bool:
@@ -1622,6 +1826,9 @@ def pipe_into(
     result). A non-empty result is rewritten clean. An empty clean result
     removes a 0-byte placeholder. A cap that printed bytes keeps that partial
     and records exit 124 so --resume runs the tool again.
+
+    A stage that copies this body to a root file then calls release_tool_body()
+    so the result is stored once. The .rc file stays for --resume.
     """
     cap = tool_cap(cap_key)
     live = LiveToolFile(outdir, stage, tool, suffix=suffix)
@@ -1807,7 +2014,6 @@ def classify_urls(
             lines = lines[:cap]
         body = "\n".join(lines) + ("\n" if lines else "")
         write_utf8(gf_bucket_path(outdir, pat), body)
-        save_tool_raw(outdir, "gf", pat, body)
 
     if len(pending) == 1:
         _one(pending[0])
@@ -1828,8 +2034,8 @@ def gf_candidates(
 ) -> tuple[bytes, bool]:
     """Bucket bytes for one pattern, and whether gf itself produced them.
 
-    Copies a non-empty bucket into tools/<stage>/<tool>.txt so the phase
-    reviewer still sees the list the check used.
+    The list lives in the root bucket (`gf_xss.txt` and the other names in
+    `_GF_BUCKETS`). `stage` and `tool` stay in the signature for callers.
     """
     classify_urls(outdir, urls_file, target, patterns=(pattern,))
     path = gf_bucket_path(outdir, pattern)
@@ -1840,8 +2046,6 @@ def gf_candidates(
     used_gf = which("gf") is not None
     if not used_gf and not data.strip() and pattern in _GF_QUERY_FALLBACK and urls_file.exists():
         data = _parameterized_urls(urls_file.read_bytes())
-    if data.strip():
-        save_tool_raw(outdir, stage, tool, data)
     return data, used_gf
 
 
@@ -1990,28 +2194,12 @@ def update_asset_diff(outdir: Path, name: str) -> None:
     }
     doc["files"] = files
     write_utf8(doc_path, json.dumps(doc, indent=2) + "\n")
-    lines = ["# Asset diff", ""]
-    for fname in _ASSET_DIFF_FILES:
-        section = files.get(fname)
-        if not isinstance(section, dict):
-            continue
-        lines.append(f"## {fname}")
-        lines.append("")
-        if section.get("first_run"):
-            lines.append("- First run. No previous file to compare.")
-        else:
-            shown_new = section.get("new") or []
-            shown_old = section.get("removed") or []
-            lines.append(
-                f"- New: {section.get('new_count', 0)}"
-                + (f" — {', '.join(shown_new[:20])}" if shown_new else "")
-            )
-            lines.append(
-                f"- Removed: {section.get('removed_count', 0)}"
-                + (f" — {', '.join(shown_old[:20])}" if shown_old else "")
-            )
-        lines.append("")
-    write_utf8(outdir / "diff_assets.md", "\n".join(lines).rstrip() + "\n")
+    md_path = outdir / "diff_assets.md"
+    try:
+        if md_path.is_file():
+            md_path.unlink()
+    except Exception:
+        pass
 
 
 def parse_httpx_line(line: str) -> dict:
@@ -2053,17 +2241,15 @@ def parse_httpx_line(line: str) -> dict:
     }
 
 
-def write_httpprobe_summary(alive_file: Path, outdir: Path) -> None:
-    rows = []
-    if alive_file.exists():
-        for line in alive_file.read_text(encoding="utf-8", errors="replace").splitlines():
-            row = parse_httpx_line(line)
-            if row:
-                rows.append(row)
-    write_utf8(
-        outdir / "httpprobe.json",
-        json.dumps({"count": len(rows), "hosts": rows}, indent=2) + "\n",
-    )
+def _drop_probe_echoes(outdir: Path) -> None:
+    """alive.txt is the probe result. Drop older URL-only and JSON copies."""
+    for name in ("alive_urls.txt", "httpprobe.json"):
+        path = outdir / name
+        try:
+            if path.is_file():
+                path.unlink()
+        except Exception:
+            pass
 
 
 def run_named_jobs(jobs: list[tuple[str, object]]) -> list[str]:
@@ -2172,11 +2358,10 @@ def write_param_priority(outdir: Path) -> None:
         return
     text = "\n".join(lines) + "\n"
     write_utf8(outdir / "param_priority.txt", text)
-    save_tool_raw(outdir, "params", "priority", text)
 
 
 def write_tech_routes(outdir: Path) -> None:
-    """Map what this run already saw onto /prove techniques. Does not run them."""
+    """Map what this run already saw onto prove techniques. Does not run them."""
     blob = ""
     alive = outdir / "alive.txt"
     if alive.exists():
@@ -2198,9 +2383,9 @@ def write_tech_routes(outdir: Path) -> None:
 
     for needle, technique in _TECH_PROVE:
         if needle in blob:
-            add(technique, f"{needle} seen in probe/js/url output — /prove run <target> --technique {technique}")
+            add(technique, f"{needle} seen in probe/js/url output — python recon.py prove run --target <target> --technique {technique}")
     if "eyj" in blob or "jwt" in blob or "bearer " in blob:
-        add("jwt_inspect", "JWT-shaped material in JS or probe output — /prove run <target> --technique jwt_inspect")
+        add("jwt_inspect", "JWT-shaped material in JS or probe output — python recon.py prove run --target <target> --technique jwt_inspect")
     for fname, technique, why in (
         ("cname_takeover_candidates.txt", "takeover_fingerprint", "cname candidates file is non-empty"),
         ("graphql_endpoints.txt", "graphql_typename", "graphql endpoints file is non-empty"),
@@ -2215,14 +2400,13 @@ def write_tech_routes(outdir: Path) -> None:
         fp = outdir / fname
         try:
             if fp.exists() and fp.stat().st_size > 0:
-                add(technique, f"{why} — /prove run <target> --technique {technique}")
+                add(technique, f"{why} — python recon.py prove run --target <target> --technique {technique}")
         except Exception:
             continue
     if not lines:
         return
     text = "\n".join(lines) + "\n"
     write_utf8(outdir / "tech_routes.txt", text)
-    save_tool_raw(outdir, "prove", "tech_routes", text)
 
 
 # --------------------------------------------------------------------------- #
@@ -2758,7 +2942,6 @@ def _write_secrets_map(data: dict[str, str]) -> None:
         "# paste its contents anywhere — treat it exactly like a password file.\n"
         "#\n"
         "# Set via:  python recon.py keys set NAME value\n"
-        "#       or: /keys set NAME value\n"
     )
     body = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
     SECRETS_FILE.write_text(header + (body + "\n" if body else ""))
@@ -2777,8 +2960,7 @@ def cmd_keys(args) -> None:
             fail(
                 f"invalid key name {name!r}. Use UPPER_SNAKE like PDCP_API_KEY.\n"
                 f"  correct:  python recon.py keys set PDCP_API_KEY <token>\n"
-                f"            /keys set PDCP_API_KEY <token>\n"
-                f"  wrong:    /keys set set PDCP_API_KEY <token>  (extra 'set')"
+                f"  wrong:    python recon.py keys set set PDCP_API_KEY <token>  (extra 'set')"
             )
             return
         if not value or value.lower() in _RESERVED_KEY_NAMES or value in ("/exit", "exit"):
@@ -2805,7 +2987,6 @@ def cmd_keys(args) -> None:
         print(f"Secrets file: {SECRETS_FILE}\n")
         if not data and not any(os.environ.get(n) for n in KNOWN_API_KEYS):
             print("No secrets stored yet.")
-            print("  /keys set PDCP_API_KEY <token>")
             print("  python recon.py keys set PDCP_API_KEY <token>")
             return
         # Known keys first
@@ -2938,19 +3119,52 @@ def require_scope_or_exit(target: str) -> None:
 # --------------------------------------------------------------------------- #
 
 def _amass_timeout_sec() -> int:
+    return current_tool_timeout("RECON_AMASS_TIMEOUT")
+
+
+def _passive_refusal(body: str) -> str:
+    """Short reason when a passive API clearly rate-limits or refuses."""
+    low = (body or "").lower()
+    if "too many requests" in low or "rate limit" in low or "api count exceeded" in low:
+        return "rate-limited"
+    if "unauthorized" in low or "access denied" in low or "forbidden" in low:
+        return "refused"
+    return ""
+
+
+def otx_hosts_from_body(body: str) -> tuple[list[str] | None, str]:
+    """Hostnames from an OTX passive-DNS body, plus a refusal reason.
+
+    None means the body was not a JSON object, so the caller leaves the
+    raw response as the only saved copy and still finishes the tool row.
+    A warning is reserved for an explicit rate-limit or auth refusal.
+    """
+    text = body or ""
     try:
-        return max(30, min(int(os.environ.get("RECON_AMASS_TIMEOUT") or "180"), 900))
-    except (TypeError, ValueError):
-        return 180
+        payload = json.loads(text) if text.strip() else None
+    except json.JSONDecodeError:
+        return None, _passive_refusal(text)
+    if not isinstance(payload, dict):
+        return None, _passive_refusal(text)
+    hosts: list[str] = []
+    for row in payload.get("passive_dns") or []:
+        if isinstance(row, dict) and row.get("hostname"):
+            hosts.append(str(row["hostname"]))
+    if hosts:
+        return hosts, ""
+    reason = _passive_refusal(text)
+    if reason:
+        return None, reason
+    return hosts, ""
 
 
 def _run_amass(path: str, target: str, on_stdout=None):
     """Passive amass only, with a hard process cap (default 180s).
 
     Never run `amass enum -d` with no timeout — that is the hours-long hang.
+    The cap is reported only when the process actually hits it.
     """
     cap = _amass_timeout_sec()
-    warn(f"amass: hard cap {cap}s (set RECON_AMASS_TIMEOUT to change, max 900)")
     attempts = [
         [path, "enum", "-passive", "-d", target, "-timeout", "2"],
         [path, "enum", "-d", target, "-timeout", "2"],
@@ -2962,7 +3176,8 @@ def _run_amass(path: str, target: str, on_stdout=None):
         out = (last.stdout or b"").strip()
         err = (last.stderr or b"").decode(errors="ignore").lower()
         if last.returncode == 124:
-            warn("amass hit the time cap — keeping partial stdout")
+            # The tool job reports this cap once. A second warning here
+            # stacked "partial stdout" on top of "partial names".
             return last
         if last.returncode == 0 and out:
             return last
@@ -3010,7 +3225,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
                 note_dropped(outdir, "subdomains", reason, value)
             added = merge_names(collected, hosts)
             flush_merge(subs_file, collected)
-        ok(f"{tool}: {len(hosts)} name(s), {added} new → tools/subdomains/{tool}.txt · {subs_file.name}")
+        ok(f"{tool}: {len(hosts)} name(s), {added} new")
         return added
 
     # These sources do not need each other's output. Amass keeps its own cap
@@ -3072,18 +3287,24 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
                     result = _run_amass(path, target, on_stdout=live.write)
                 else:
                     cap = tool_cap("subdomain")
-                    info(f"{binary}: hard cap {int(cap)}s (set RECON_SUBDOMAIN_TIMEOUT to change)")
+                    info(f"{binary}: hard cap {int(cap)}s (python recon.py set RECON_SUBDOMAIN_TIMEOUT to change)")
                     result = run(
                         [path] + args, capture=True, timeout=cap, on_stdout=live.write,
                     )
             finally:
                 live.close()
-            if result is not None and result.returncode == 124:
-                warn(f"{binary} hit the time cap — keeping partial names")
-            added = ingest(binary, (result.stdout if result else b"") or b"")
             rc = result.returncode if result is not None else None
+            if rc == 124:
+                if binary == "amass":
+                    warn(
+                        "amass hit the time cap — keeping partial names "
+                        "(python recon.py set RECON_AMASS_TIMEOUT <seconds>, next start)"
+                    )
+                else:
+                    warn(f"{binary} hit the time cap — keeping partial names")
+            added = ingest(binary, (result.stdout if result else b"") or b"")
             _cl_finish(binary, added)
-            if added == 0:
+            if added == 0 and rc != 124:
                 reason = f"exit={rc}" if rc not in (0, None) else "empty/no new hosts"
                 warn(f"{binary} returned 0 new subdomains ({reason}) — see {DEBUG_LOG} "
                      f"(common causes: missing API key, rate limit, network block, or tool not installed).")
@@ -3161,21 +3382,13 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
         )
         r = run([curl, "-sS", "--max-time", "30", "--retry", "2", url], capture=True)
         save_tool_raw(outdir, "subdomains", "otx", r.stdout or b"", suffix=".json")
-        added = 0
         body = (r.stdout or b"").decode(errors="ignore")
-        try:
-            payload = json.loads(body or "null")
-            if not isinstance(payload, dict):
-                raise ValueError("not an object")
-            hosts = []
-            for row in payload.get("passive_dns") or []:
-                if isinstance(row, dict) and row.get("hostname"):
-                    hosts.append(str(row["hostname"]))
+        hosts, reason = otx_hosts_from_body(body)
+        added = 0
+        if reason:
+            warn(f"OTX {reason} — other sources still count — see {DEBUG_LOG}")
+        elif hosts is not None:
             added = ingest("otx", ("\n".join(hosts) + ("\n" if hosts else "")).encode())
-            if not hosts:
-                warn("OTX returned no hostnames — other sources still count")
-        except Exception:
-            warn(f"OTX response wasn't valid JSON — see {DEBUG_LOG}")
         _cl_finish("otx", added)
 
     named_jobs = [(binary, _tool_job(binary, args)) for binary, args in tools]
@@ -3202,7 +3415,7 @@ def stage_subdomains(target: str, outdir: Path) -> Path:
     _maybe_filter_wildcard_dns(target, collected, outdir)
     write_host_list(subs_file, sorted(collected))
     update_asset_diff(outdir, "subdomains.txt")
-    ok(f"{len(collected)} unique subdomains -> {subs_file}  (per-tool: {tool_dir(outdir, 'subdomains')})")
+    ok(f"{len(collected)} unique subdomains -> {subs_file}")
     return subs_file
 
 
@@ -3217,6 +3430,7 @@ def _maybe_filter_wildcard_dns(target: str, collected: set[str], outdir: Path) -
             [["dnsx", "-silent", "-a", "-resp-only"]],
             input_data=(nonce + "\n").encode(),
             timeout=tool_cap("httpx-host"),
+            echo=False,
         )
     except Exception:
         return
@@ -3319,6 +3533,21 @@ def _dns_input_names(target: str, subs_file: Path, permute_raw: Path) -> tuple[l
     return names, permute_names
 
 
+def _release_dns_copies(outdir: Path, *, adopted: bool) -> None:
+    """resolved.txt, dns_records.txt, and the CNAME file are the DNS results."""
+    records = outdir / "dns_records.txt"
+    try:
+        if not records.is_file():
+            return
+    except Exception:
+        return
+    if adopted or _tool_rc_complete(outdir, "dns", "dnsx-records"):
+        release_tool_body(outdir, "dns", "dnsx-records")
+    if (outdir / "resolved.txt").is_file():
+        drop_tool_files(outdir, "dns", "dnsx-resolved")
+    drop_tool_files(outdir, "dns", "dnsx-cname")
+
+
 def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
     step("DNS intelligence (one dnsx pass): records, resolve, CNAME candidates", phase="dns")
     dnsx = which("dnsx")
@@ -3335,11 +3564,12 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
             newest = permute_raw
     except Exception:
         newest = subs_file
-    if all(
-        should_skip_tool(outdir, "dns", tool, newest)
-        for tool in ("dnsx-resolved", "dnsx-records", "dnsx-cname")
+    if should_skip_tool(
+        outdir, "dns", "dnsx-records", newest,
+        canonical=outdir / "dns_records.txt",
     ):
-        info("resume: dns tool files are fresh")
+        info("resume: dns records are fresh")
+        _release_dns_copies(outdir, adopted=False)
         return
     names, permute_names = _dns_input_names(target, subs_file, permute_raw)
     n_subs = len(names)
@@ -3377,20 +3607,11 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
             cl.finish_tool("dnsx-cname", 0)
             cl.stop(final_msg=f"DNS · {n_subs} host(s)")
         return
-    if not records.strip():
-        save_tool_raw(outdir, "dns", "dnsx-records", "\n")
-    save_tool_raw(
-        outdir, "dns", "dnsx-resolved",
-        "\n".join(resolved_hosts) if resolved_hosts else "\n",
-    )
-    save_tool_raw(
-        outdir, "dns", "dnsx-cname",
-        "\n".join(cname_lines) if cname_lines else "\n",
-    )
     snapshot_prev(outdir / "resolved.txt")
     n_res = write_host_list(outdir / "resolved.txt", resolved_hosts)
     update_asset_diff(outdir, "resolved.txt")
     write_utf8(outdir / "dns_records.txt", "\n".join(rec_lines) + ("\n" if rec_lines else ""))
+    _release_dns_copies(outdir, adopted=True)
     if cl:
         cl.finish_tool("dnsx-records", len(rec_lines))
     ok(f"{n_res} resolved hosts -> {outdir / 'resolved.txt'}")
@@ -3458,11 +3679,14 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
         cl = None
     from hunter.session import httpx_h_flags
     probe_bytes = probe_src.read_bytes()
-    if should_skip_tool(outdir, "httpprobe", "httpx", probe_src):
-        info("resume: skip httpx (tools/httpprobe/httpx.txt is fresh)")
+    if should_skip_tool(
+        outdir, "httpprobe", "httpx", probe_src, canonical=alive_file,
+    ):
+        info("resume: skip httpx (alive.txt is fresh)")
         if alive_file.exists() and alive_file.stat().st_size:
+            release_tool_body(outdir, "httpprobe", "httpx")
+            _drop_probe_echoes(outdir)
             try:
-                write_httpprobe_summary(alive_file, outdir)
                 write_tech_routes(outdir)
             except Exception:
                 pass
@@ -3503,9 +3727,9 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
         snapshot_prev(alive_file)
         write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
         _filter_wildcard_http(alive_file, outdir, outdir.name)
-        write_clean_alive_urls(alive_file, outdir)
-        write_httpprobe_summary(alive_file, outdir)
         update_asset_diff(outdir, "alive.txt")
+        release_tool_body(outdir, "httpprobe", "httpx")
+    _drop_probe_echoes(outdir)
     n = len([ln for ln in alive_file.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()])
     if cl:
         cl.finish_tool("httpx", n)
@@ -3516,11 +3740,11 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
         wafs = detect_waf(alive_file)
         if wafs:
             (outdir / "waf_detected.txt").write_text("\n".join(wafs) + "\n", encoding="utf-8")
-            warn(f"WAF fingerprints: {', '.join(wafs)} — consider /rate stealth")
+            warn(f"WAF fingerprints: {', '.join(wafs)} — consider python recon.py rate stealth")
             if _rate_profile() != "stealth" and "cloudflare" in wafs:
                 warn(
                     "Cloudflare-like WAF — stealth for remaining tools this process only "
-                    "(does not rewrite ~/.reconkit/config.json; /rate stealth to persist)"
+                    "(does not rewrite ~/.reconkit/config.json; python recon.py rate stealth to persist)"
                 )
                 os.environ["RECON_RATE"] = "stealth"
     except Exception:
@@ -3555,9 +3779,13 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
         cl.start_tool("tlsx")
     except Exception:
         cl = None
-    if should_skip_tool(outdir, "tls", "tlsx", alive_file, suffix=".json"):
+    tls_path = outdir / "tls_recon.json"
+    if should_skip_tool(
+        outdir, "tls", "tlsx", alive_file, suffix=".json", canonical=tls_path,
+    ):
         info("resume: skip tlsx")
-        if (outdir / "tls_recon.json").exists():
+        if tls_path.exists() and tls_path.stat().st_size:
+            release_tool_body(outdir, "tls", "tlsx", suffix=".json")
             if cl:
                 cl.finish_tool("tlsx", skipped=True, detail="resume")
                 cl.stop(final_msg="TLS")
@@ -3579,11 +3807,11 @@ def stage_tls(alive_file: Path, outdir: Path) -> None:
     if cl:
         cl.finish_tool("tlsx", n)
         cl.stop(final_msg=f"TLS · {len(host_list)} host(s)")
-    tls_path = outdir / "tls_recon.json"
     if failed_empty(text, int(_LAST_PIPE_RC)) and tls_path.exists() and tls_path.stat().st_size:
         warn("tlsx returned nothing after a non-zero exit; keeping the previous tls_recon.json")
     else:
         write_utf8(tls_path, text)
+        release_tool_body(outdir, "tls", "tlsx", suffix=".json")
     ok(f"TLS recon -> {tls_path}")
 
 
@@ -3624,7 +3852,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
         collapsed = collapse_url_shapes(sorted(collected))
         write_utf8(urls_file, "\n".join(collapsed) + ("\n" if collapsed else ""))
         added = len(collected) - before
-        ok(f"{tool}: {len(kept)} in-scope URL(s), {added} new → tools/crawl/{tool}.txt · urls.txt")
+        ok(f"{tool}: {len(kept)} in-scope URL(s), {added} new")
         return added
 
     crawl_tools = ["katana", "gospider", "hakrawler", "gau", "waybackurls"]
@@ -3844,6 +4072,7 @@ def stage_crawl(alive_file: Path, outdir: Path) -> Path:
             url_list = filter_urls_to_target(
                 deduped.decode(errors="ignore").splitlines(), target
             )
+            release_tool_body(outdir, "crawl", "uro")
         else:
             url_list = sorted(collected)
             warn("uro returned nothing — keeping the in-scope URL set")
@@ -3873,7 +4102,6 @@ def stage_js(urls_file: Path, outdir: Path) -> Path:
         if re.search(r"\.js(\?|$)", u) and url_belongs_to_target(u, target)
     })
     write_utf8(js_file, "\n".join(js_urls) + ("\n" if js_urls else ""))
-    save_tool_raw(outdir, "js", "js_urls", "\n".join(js_urls))
     ok(f"{len(js_urls)} JS files -> {js_file}")
 
     curl = which("curl")
@@ -3968,15 +4196,21 @@ def stage_params(urls_file: Path, outdir: Path) -> None:
     if unfurl:
         if cl:
             cl.start_tool("unfurl")
-        if should_skip_tool(outdir, "params", "unfurl", urls_file):
+        names_path = outdir / "param_names.txt"
+        if should_skip_tool(outdir, "params", "unfurl", urls_file, canonical=names_path):
             info("resume: skip unfurl")
-            keys = read_tool_bytes(outdir, "params", "unfurl")
+            if names_path.is_file() and names_path.stat().st_size:
+                keys = names_path.read_bytes()
+            else:
+                keys = read_tool_bytes(outdir, "params", "unfurl")
         else:
             keys = pipe_into(
                 [["unfurl", "keys"]], urls_data,
                 outdir=outdir, stage="params", tool="unfurl", cap_key="params",
             )
-        n = write_lines(outdir / "param_names.txt", keys)
+        n = write_lines(names_path, keys)
+        if _tool_rc_complete(outdir, "params", "unfurl"):
+            release_tool_body(outdir, "params", "unfurl")
         if cl:
             cl.finish_tool("unfurl", n)
         ok(f"Parameter names -> {outdir / 'param_names.txt'}")
@@ -3999,9 +4233,6 @@ def stage_params(urls_file: Path, outdir: Path) -> None:
                 [arjun, "-i", str(arjun_in), "-oT", str(outdir / "arjun_params.txt"), "--stable"],
                 timeout=tool_cap("arjun"),
             )
-            arjun_out = outdir / "arjun_params.txt"
-            if arjun_out.exists():
-                save_tool_raw(outdir, "params", "arjun", arjun_out.read_text(encoding="utf-8", errors="replace"))
         else:
             warn("arjun: no parameterized URLs to mine.")
         hits = 0
@@ -4060,6 +4291,8 @@ def stage_content_discovery(alive_file: Path, outdir: Path, wordlist: Path | Non
                 "-- partial hits kept"
             )
         write_lines(outdir / "sensitive_paths_found.txt", blob)
+        if int(_LAST_PIPE_RC) != 124:
+            release_tool_body(outdir, "content", "httpx-sensitive")
         ok(f"Sensitive-path checks -> {outdir / 'sensitive_paths_found.txt'}")
     else:
         warn("httpx not found; skipping sensitive-path checks.")
@@ -4132,6 +4365,8 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
         lines = [ln for ln in reflected.decode(errors="ignore").splitlines() if "Not Reflected" not in ln]
         lines = _xss_unique_marker_filter(lines)
         write_lines(outdir / "xss_reflected_params.txt", "\n".join(lines).encode())
+        if int(_LAST_PIPE_RC) != 124:
+            release_tool_body(outdir, "xss", "kxss")
         if cl:
             cl.finish_tool("kxss", len(lines))
         ok(f"Reflected-parameter candidates -> {outdir / 'xss_reflected_params.txt'}")
@@ -4170,6 +4405,8 @@ def stage_xss(urls_file: Path, outdir: Path) -> None:
             outdir=outdir, stage="xss", tool="dalfox", cap_key="xss",
         )
         (outdir / "dalfox_results.txt").write_bytes(result)
+        if int(_LAST_PIPE_RC) != 124:
+            release_tool_body(outdir, "xss", "dalfox")
         n = len([ln for ln in result.decode(errors="ignore").splitlines() if ln.strip()])
         if cl:
             cl.finish_tool("dalfox", n)
@@ -4255,6 +4492,8 @@ def stage_sqli(urls_file: Path, outdir: Path) -> None:
          *_sqli_h()],
     ], candidates, outdir=outdir, stage="sqli", tool="error-canary", cap_key="canary")
     n_err = write_lines(outdir / "sqli_error_based.txt", errors)
+    if int(_LAST_PIPE_RC) != 124:
+        release_tool_body(outdir, "sqli", "error-canary")
     if cl:
         cl.finish_tool("error-canary", n_err)
 
@@ -4347,6 +4586,8 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
             ["httpx", "-silent", "-match-string", "ami-id", *_ssrf_h()],
         ], ssrf_candidates, outdir=outdir, stage="ssrf_ssti", tool="ssrf-metadata", cap_key="canary")
         n = write_lines(outdir / "ssrf_metadata_candidates.txt", metadata_hits)
+        if int(_LAST_PIPE_RC) != 124:
+            release_tool_body(outdir, "ssrf_ssti", "ssrf-metadata")
         if cl:
             cl.finish_tool("ssrf-metadata", n)
         ok(f"SSRF (cloud-metadata) candidates -> {outdir / 'ssrf_metadata_candidates.txt'}")
@@ -4367,6 +4608,8 @@ def stage_ssrf_ssti(urls_file: Path, outdir: Path) -> None:
         ], ssti_candidates, outdir=outdir, stage="ssrf_ssti", tool="ssti-math", cap_key="canary")
         arithmetic_hits = _ssti_baseline_filter(arithmetic_hits)
         n = write_lines(outdir / "ssti_candidates.txt", arithmetic_hits)
+        if int(_LAST_PIPE_RC) != 124:
+            release_tool_body(outdir, "ssrf_ssti", "ssti-math")
         if cl:
             cl.finish_tool("ssti-math", n)
         ok(f"SSTI arithmetic-canary candidates -> {outdir / 'ssti_candidates.txt'} "
@@ -4508,7 +4751,6 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
 
     def _exec_pack(fname: str, extra_args: list[str], pack: str, rate: int, conc: int) -> None:
         out_path = outdir / fname
-        pack_tool = Path(fname).stem
         with cl_lock:
             if checklist:
                 checklist.start_tool(pack)
@@ -4526,11 +4768,6 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
         )
         if proc.returncode == 124:
             warn(f"nuclei {pack} hit the {int(nuc_cap)}s cap — partial {fname} kept, next pack continues")
-        if out_path.exists():
-            save_tool_raw(
-                outdir, "nuclei", pack_tool,
-                out_path.read_text(encoding="utf-8", errors="replace"),
-            )
         hits = 0
         try:
             if out_path.exists():
@@ -4549,11 +4786,6 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
         pack_tool = Path(fname).stem
         if _pack_is_fresh(fname, pack_tool, out_path):
             info(f"resume: skip nuclei {pack}")
-            if out_path.exists():
-                save_tool_raw(
-                    outdir, "nuclei", pack_tool,
-                    out_path.read_text(encoding="utf-8", errors="replace"),
-                )
             if checklist:
                 checklist.finish_tool(pack, skipped=True, detail="resume")
             continue
@@ -4604,11 +4836,6 @@ def stage_nuclei(alive_file: Path, subs_file: Path, outdir: Path) -> None:
                 )
                 if proc.returncode == 124:
                     warn(f"nuclei tech hit the {int(nuc_cap)}s cap — partial nuclei_tech.txt kept")
-            if out_path.exists():
-                save_tool_raw(
-                    outdir, "nuclei", "nuclei_tech",
-                    out_path.read_text(encoding="utf-8", errors="replace"),
-                )
             hits = 0
             if out_path.exists():
                 hits = sum(1 for ln in out_path.read_text(errors="ignore").splitlines() if ln.strip())
@@ -4737,7 +4964,7 @@ ALL_MODULES = [
     "cloud", "takeover_plus", "osint", "gitrecon", "screenshots",
 ]
 
-# Bare `python recon.py example.com` and `/run example.com`. Active checks stay opt-in.
+# Bare `python recon.py example.com`. Active checks stay opt-in.
 DEFAULT_MODULES = [
     "subdomains", "dns", "httpprobe", "tls", "wellknown", "crawl",
 ]
@@ -4912,7 +5139,7 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
         with _STAGE_UI_LOCK:
             _end_ui(time.time() - t0)
         if e.__class__.__name__ == "RunStopped":
-            warn(f"stage {name} interrupted by /stop")
+            warn(f"stage {name} interrupted")
         raise
     elapsed = time.time() - t0
     with _STAGE_UI_LOCK:
@@ -4927,7 +5154,8 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
                 debug(f"    wrote {fname}: {line_info}{size} bytes")
         else:
             debug("    (no files created or changed by this stage)")
-    elif VERBOSE >= VERBOSE_NORMAL:
+    elif VERBOSE >= VERBOSE_NORMAL and _PIPELINE is None:
+        # The pipeline already printed the phase bar with this elapsed time.
         ok(f"stage {name} finished in {elapsed:.1f}s")
     try:
         from agents.supervisor import schedule_phase_review
@@ -4939,6 +5167,11 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
 
 def cmd_run(args) -> None:
     global _PIPELINE
+    try:
+        from progress_ui import prepare_foreground_progress
+        prepare_foreground_progress()
+    except Exception:
+        pass
     scope_all = bool(getattr(args, "scope_all", False))
     target = (getattr(args, "target", None) or "").strip()
     if scope_all:
@@ -4974,6 +5207,7 @@ def cmd_run(args) -> None:
         sys.exit(1)
 
     ensure_dirs()
+    apply_saved_timeouts()
     try:
         outdir = output_dir_for(target)
     except ValueError as exc:
@@ -4982,7 +5216,7 @@ def cmd_run(args) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
     # Always seed live tracker before stages (dashboard polls this file).
-    # source= distinguishes /run /quick /full /scan /playbook /agent /cli
+    # source= distinguishes a playbook, the agent, and a direct scan
     source = str(getattr(args, "source", None) or "pipeline").strip() or "pipeline"
     try:
         from live_mission import start_run
@@ -5255,6 +5489,67 @@ def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, w
         write_tech_routes(outdir)
     except Exception:
         pass
+    _release_finished_copies(outdir)
+
+
+def _release_finished_copies(outdir: Path) -> None:
+    """Drop a tools/ body when the root file already holds that finished result."""
+    pairs = (
+        ("httpprobe", "httpx", ".txt", "alive.txt"),
+        ("tls", "tlsx", ".json", "tls_recon.json"),
+        ("wellknown", "httpx", ".txt", "wellknown.txt"),
+        ("dns", "dnsx-records", ".txt", "dns_records.txt"),
+        ("js", "js_urls", ".txt", "js_urls.txt"),
+        ("ports", "httpx", ".txt", "ports_http.txt"),
+        ("prove", "tech_routes", ".txt", "tech_routes.txt"),
+        ("params", "priority", ".txt", "param_priority.txt"),
+        ("params", "unfurl", ".txt", "param_names.txt"),
+        ("params", "arjun", ".txt", "arjun_params.txt"),
+        ("content", "httpx-sensitive", ".txt", "sensitive_paths_found.txt"),
+        ("xss", "kxss", ".txt", "xss_reflected_params.txt"),
+        ("xss", "dalfox", ".txt", "dalfox_results.txt"),
+        ("sqli", "error-canary", ".txt", "sqli_error_based.txt"),
+        ("ssrf_ssti", "ssrf-metadata", ".txt", "ssrf_metadata_candidates.txt"),
+        ("ssrf_ssti", "ssti-math", ".txt", "ssti_candidates.txt"),
+    )
+    for stage, tool, suffix, canon_name in pairs:
+        canon = outdir / canon_name
+        try:
+            if not canon.is_file() or canon.stat().st_size == 0:
+                continue
+        except OSError:
+            continue
+        if not _tool_rc_complete(outdir, stage, tool, suffix):
+            continue
+        release_tool_body(outdir, stage, tool, suffix=suffix)
+    _release_dns_copies(outdir, adopted=False)
+    for pat, name in _GF_BUCKETS.items():
+        try:
+            if (outdir / name).is_file():
+                release_tool_body(outdir, "gf", pat)
+        except OSError:
+            continue
+    for stage, tool, bucket in (
+        ("xss", "gf", "gf_xss.txt"),
+        ("sqli", "gf", "gf_sqli.txt"),
+        ("ssrf_ssti", "gf-ssrf", "gf_ssrf.txt"),
+        ("ssrf_ssti", "gf-ssti", "gf_ssti.txt"),
+    ):
+        try:
+            if (outdir / bucket).is_file():
+                drop_tool_files(outdir, stage, tool)
+        except OSError:
+            continue
+    try:
+        packs = list(outdir.glob("nuclei_*.txt"))
+    except OSError:
+        packs = []
+    for path in packs:
+        try:
+            if path.is_file() and path.stat().st_size and _tool_rc_complete(outdir, "nuclei", path.stem):
+                release_tool_body(outdir, "nuclei", path.stem)
+        except OSError:
+            continue
 
 
 # --------------------------------------------------------------------------- #
@@ -5263,18 +5558,339 @@ def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, w
 
 def cmd_view(args) -> None:
     """Open the local scan view. It follows a scan; it does not start one."""
-    from shell.view import open_view
+    from scan_view import open_view
 
     open_view(getattr(args, "target", "") or "")
 
 
-def cmd_shell(_args) -> None:
-    """Launch the cyber interactive shell (v3.0.0)."""
-    from shell import ReconShell
-    ReconShell(
-        verbose=VERBOSE,
-        target=getattr(_args, "target", "") or "",
-    ).run()
+def cmd_notable(args) -> None:
+    from findings.indexer import query_store
+    from findings.scoring import NOTABLE_THRESHOLD
+
+    target = (getattr(args, "target", "") or "").strip() or None
+    limit = int(getattr(args, "limit", None) or 25)
+    rows, stats = query_store(target=target, notable=True, limit=limit, offset=0)
+    banner(f"Notable records (score≥{NOTABLE_THRESHOLD})" + (f" — {target}" if target else ""))
+    if not rows:
+        warn("No notable rows. Run a scan, then: python recon.py findings reindex")
+        return
+    for row in rows:
+        print(
+            f"  [{row.get('score')}] [{row.get('confidence') or 'C0'}] {row.get('severity')}  "
+            f"{str(row.get('module') or ''):12}  {str(row.get('ftype') or ''):10}  "
+            f"{(row.get('asset') or '')[:70]}"
+        )
+    print(
+        f"\n  {len(rows)} shown / {stats.get('total', len(rows))} notable  "
+        f"· threshold={NOTABLE_THRESHOLD}  · {stats.get('backend')}"
+    )
+
+
+def cmd_eval(args) -> None:
+    from agents.eval import evaluate_findings, format_eval_report
+    from findings.indexer import query_store
+
+    target = (getattr(args, "target", "") or "").strip() or None
+    limit = int(getattr(args, "limit", None) or 15)
+    use_llm = bool(getattr(args, "llm", False))
+    rows, stats = query_store(
+        target=target, min_confidence="C1", limit=max(limit, 30), offset=0,
+    )
+    if not rows:
+        warn("no C1+ findings — run a scan, then: python recon.py findings reindex")
+        return
+    llm = None
+    if use_llm:
+        try:
+            from agents.llm import LLMClient
+            llm = LLMClient()
+        except Exception as e:
+            warn(f"LLM unavailable ({e}); heuristic only")
+            use_llm = False
+    ev = evaluate_findings(rows, limit=limit, use_llm=use_llm, llm=llm)
+    banner(f"eval C0–C4{f' — {target}' if target else ''}  ({stats.get('backend')})")
+    print(format_eval_report(ev))
+
+
+def cmd_diff(args) -> None:
+    from findings.history import diff_target
+
+    target = (getattr(args, "target", "") or "").strip()
+    if not target:
+        fail("diff requires --target")
+        sys.exit(2)
+    diff = diff_target(target)
+    if not diff.get("ok"):
+        warn(diff.get("reason", "diff unavailable"))
+        print(f"  snapshots: {diff.get('snapshots')}")
+        info("Run findings reindex at least twice after scans.")
+        return
+    banner(f"Diff {target}")
+    print(f"  older: {diff.get('older')} @ {diff.get('older_at')}")
+    print(f"  newer: {diff.get('newer')} @ {diff.get('newer_at')}")
+    print(
+        f"  new={diff.get('new_count')}  gone={diff.get('gone_count')}  "
+        f"score-changed={diff.get('changed_count')}"
+    )
+    if diff.get("new"):
+        print("\n  NEW:")
+        for row in diff["new"][:20]:
+            print(f"    + [{row.get('score')}] {row.get('severity')} {row.get('module')} {row.get('asset', '')[:60]}")
+    if diff.get("gone"):
+        print("\n  GONE:")
+        for row in diff["gone"][:10]:
+            print(f"    - {row.get('module')} {row.get('asset', '')[:60]}")
+
+
+def cmd_report(args) -> None:
+    from findings.indexer import get_or_build_index
+    from findings.report import write_report
+
+    target = (getattr(args, "target", "") or "").strip()
+    if not target:
+        fail("report requires --target")
+        sys.exit(2)
+    idx = get_or_build_index(refresh=False)
+    path = write_report(
+        target,
+        idx.get("findings") or [],
+        notable_only=not bool(getattr(args, "all", False)),
+    )
+    ok(f"report draft → {path}")
+
+
+def cmd_playbook(args) -> None:
+    from playbooks import get_playbook, list_playbooks, modules_csv
+
+    action = (getattr(args, "playbook_action", "") or "").lower()
+    if action == "list":
+        banner("Playbooks")
+        for book in list_playbooks():
+            print(f"  {book['name']:16}  {','.join(book['modules'])}")
+            print(f"  {'':16}  {book['description']}")
+        return
+    name = (getattr(args, "name", "") or "").strip()
+    target = (getattr(args, "target", "") or "").strip()
+    csv = modules_csv(name)
+    if not csv:
+        fail(f"unknown playbook: {name}. Try: python recon.py playbook list")
+        sys.exit(2)
+    if not target:
+        fail("playbook run requires --target")
+        sys.exit(2)
+    book = get_playbook(name) or {}
+    info(f"playbook {name}: {book.get('description', '')}")
+    cmd_run(argparse.Namespace(
+        target=target,
+        modules=csv,
+        resume=bool(getattr(args, "resume", False)),
+        force=bool(getattr(args, "force", False)),
+        scope_all=False,
+        review=bool(getattr(args, "review", False)),
+    ))
+
+
+def cmd_doctor(args) -> None:
+    from agents.doctor import diagnose_log, diagnose_target
+
+    banner("Doctor")
+    try:
+        cmd_checkenv(argparse.Namespace())
+    except Exception as e:
+        warn(f"checkenv: {e}")
+    print("\n-- debug.log hints --")
+    for hint in diagnose_log():
+        print(f"  {hint}")
+    target = (getattr(args, "target", "") or "").strip()
+    if target:
+        print(f"\n-- target {target} --")
+        info_row = diagnose_target(target)
+        print(f"  outdir: {info_row['outdir']} exists={info_row['exists']}")
+        if info_row.get("missing_core"):
+            print(f"  missing/empty: {info_row['missing_core']}")
+        for hint in info_row.get("hints") or []:
+            print(f"  • {hint}")
+
+
+def cmd_tips(args) -> None:
+    from agents.rag import search_tips
+
+    query = " ".join(getattr(args, "query", None) or []).strip()
+    if not query:
+        fail("tips requires a query")
+        sys.exit(2)
+    hits = search_tips(query, limit=5)
+    banner(f"Tips: {query}")
+    if not hits:
+        warn("No local matches. Skill files live under skills/. Notes go in ~/.reconkit/notes/")
+        return
+    for index, hit in enumerate(hits, 1):
+        print(f"\n[{index}] score={hit['score']}  source={hit['source']}")
+        print(hit["text"][:700])
+
+
+def cmd_critic(args) -> None:
+    from agents.config import load_config as load_agent_config
+    from agents.critic import review_file
+    from agents.llm import LLMClient
+
+    target = (getattr(args, "target", "") or "").strip()
+    if not target:
+        fail("critic requires --target")
+        sys.exit(2)
+    try:
+        out = output_dir_for(target)
+    except ValueError as exc:
+        fail(str(exc))
+        sys.exit(2)
+    candidates = [out / "agent_report.md", out / "report_draft.md"]
+    path = next((item for item in candidates if item.exists()), None)
+    if path is None:
+        fail(f"No report at {candidates[0]} or report_draft.md — run agents or report first")
+        sys.exit(1)
+    info(f"critic reviewing {path} …")
+    try:
+        text = review_file(path, llm=LLMClient(load_agent_config()), target=target)
+    except Exception as e:
+        fail(f"critic failed: {e}")
+        sys.exit(1)
+    out_path = out / "critic_review.md"
+    out_path.write_text(text, encoding="utf-8")
+    print(text[:4000])
+    ok(f"saved {out_path}")
+
+
+def cmd_rate(args) -> None:
+    profile = (getattr(args, "profile", "") or "show").strip().lower()
+    if profile in ("", "show", "status"):
+        current = _rate_profile()
+        settings = rate_settings()
+        info(f"rate profile: {current}")
+        print(
+            f"  httpx_threads={settings.get('httpx_threads')}  katana_depth={settings.get('katana_depth')}  "
+            f"nuclei_rl={settings.get('nuclei_rate')}  nuclei_c={settings.get('nuclei_conc')}"
+        )
+        print(
+            f"  host_cap={settings.get('host_cap')}  crawl_hosts={settings.get('crawl_hosts')}  "
+            f"js_cap={settings.get('js_cap')}  ffuf_t={settings.get('ffuf_threads')}  "
+            f"delay_s={settings.get('delay_s')}"
+        )
+        return
+    hints = {
+        "stealth": "fewer concurrent requests and a delay between stages",
+        "normal": "default toolkit behavior",
+        "aggressive": "faster; stay inside the program rules",
+    }
+    if profile not in hints:
+        fail("rate is show, stealth, normal, or aggressive")
+        sys.exit(2)
+    try:
+        persist_rate_profile(profile)
+    except ValueError as exc:
+        fail(str(exc))
+        sys.exit(2)
+    ok(f"rate → {profile}: {hints[profile]}")
+
+
+def cmd_set_timeout(args) -> None:
+    """List or store a known tool time cap. Not a general env setter."""
+    name = (getattr(args, "name", "") or "").strip()
+    seconds = getattr(args, "seconds", None)
+    if not name:
+        for env, _default, lo, hi in timeout_rows():
+            print(f"  {env}={current_tool_timeout(env)}  ({lo}-{hi}s)")
+        info("python recon.py set NAME SECONDS stores the cap for the next time that tool starts.")
+        return
+    if seconds is None:
+        try:
+            info(f"{name.upper()}={current_tool_timeout(name)}")
+        except ValueError as exc:
+            fail(str(exc))
+            sys.exit(2)
+        return
+    try:
+        stored, val = set_tool_timeout(name, seconds)
+    except ValueError as exc:
+        fail(str(exc))
+        sys.exit(2)
+    ok(f"{stored}={val}s. Applies the next time that tool starts.")
+
+
+def cmd_inbox(args) -> None:
+    from hunter.ops import build_inbox
+
+    target = (getattr(args, "target", "") or "").strip() or None
+    data = build_inbox(target=target, limit=25)
+    banner(f"hunter inbox  ({data.get('count', 0)})  {data.get('session', '')}")
+    items = data.get("items") or []
+    if not items:
+        info("no C1+ notable findings — run a scan, then: python recon.py findings reindex")
+        return
+    for index, item in enumerate(items, 1):
+        tech = item.get("technique") or "manual"
+        print(
+            f"  {index:2}. [{item.get('confidence') or '?'} {item.get('severity') or '?'}] "
+            f"{item.get('module') or ''}  {(item.get('title') or '')[:36]}  "
+            f"{(item.get('asset') or '')[:48]}  → {tech}"
+        )
+
+
+def cmd_program(args) -> None:
+    from programs.profiles import (
+        get_active_profile,
+        list_profiles,
+        set_active_program,
+    )
+
+    action = (getattr(args, "program_action", "") or "show").lower()
+    if action == "list":
+        banner("program profiles")
+        active = get_active_profile().get("name")
+        for profile in list_profiles():
+            mark = "→" if profile.get("name") == active else " "
+            print(f"  {mark} {profile.get('name'):16}  {profile.get('display_name')}")
+            if profile.get("notes"):
+                print(f"      {profile['notes']}")
+        return
+    if action == "show":
+        profile = get_active_profile()
+        banner(f"active program — {profile.get('name')}")
+        print(f"  display:     {profile.get('display_name')}")
+        print(f"  threshold:   {profile.get('notable_threshold')}")
+        print(f"  max_risk:    {profile.get('max_risk_class')}")
+        print(f"  weights:     {profile.get('bounty_weights')}")
+        if profile.get("notes"):
+            print(f"  notes:       {profile.get('notes')}")
+        return
+    name = (getattr(args, "name", "") or "").strip()
+    names = {profile["name"] for profile in list_profiles()}
+    if name not in names and name != "default":
+        fail(f"unknown profile: {name}. Try: python recon.py program list")
+        sys.exit(2)
+    path = set_active_program(name)
+    ok(f"active program → {name}  ({path})")
+    info("run findings reindex so scores pick up new weights")
+
+
+def cmd_graph(args) -> None:
+    from graph.builder import build_graph, graph_summary
+
+    action = (getattr(args, "graph_action", "") or "summary").lower()
+    target = (getattr(args, "target", "") or "").strip() or None
+    min_score = int(getattr(args, "min_score", None) or 0)
+    graph = build_graph(target=target, min_score=min_score)
+    banner(f"attack graph{f' — {target}' if target else ''}")
+    print(graph_summary(graph))
+    if action == "show":
+        print()
+        nodes = graph.get("nodes") or []
+        for node in nodes[:25]:
+            print(
+                f"  [{node.get('kind'):7}] {node.get('label', '')[:50]}  "
+                f"score={node.get('score')} sev={node.get('severity')}"
+            )
+        if len(nodes) > 25:
+            print(f"  … +{len(nodes) - 25} nodes")
 
 
 def cmd_findings(args) -> None:
@@ -5459,8 +6075,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             f"reconkit v{__version__} — authorized recon. "
-            "Entry point: python recon.py. "
-            "Interactive prompt: python recon.py shell."
+            "Entry point: python recon.py <target>."
         ),
     )
     parser.add_argument(
@@ -5544,13 +6159,6 @@ def build_parser() -> argparse.ArgumentParser:
     keys_remove_p.add_argument("name")
     keys_parser.set_defaults(func=cmd_keys)
 
-    shell_parser = sub.add_parser(
-        "shell",
-        help="Launch the cyber-themed interactive prompt (slash commands, scan picker)",
-    )
-    shell_parser.add_argument("--target", default="", help="Pre-select target in the shell")
-    shell_parser.set_defaults(func=cmd_shell)
-
     view_parser = sub.add_parser(
         "view",
         help="Open the local scan view for a target (does not start a scan)",
@@ -5627,6 +6235,81 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tw_parser.add_argument("--target", required=True)
     tw_parser.set_defaults(func=cmd_wordlist_target)
+
+    notable_parser = sub.add_parser("notable", help="List high-score findings")
+    notable_parser.add_argument("--target", default="")
+    notable_parser.add_argument("--limit", type=int, default=25)
+    notable_parser.set_defaults(func=cmd_notable)
+
+    diff_parser = sub.add_parser("diff", help="Compare two findings snapshots for a target")
+    diff_parser.add_argument("--target", required=True)
+    diff_parser.set_defaults(func=cmd_diff)
+
+    report_parser = sub.add_parser("report", help="Write a report draft from the findings index")
+    report_parser.add_argument("--target", required=True)
+    report_parser.add_argument("--all", action="store_true", help="Include rows below the notable threshold")
+    report_parser.set_defaults(func=cmd_report)
+
+    play_parser = sub.add_parser("playbook", help="Named module lists")
+    play_sub = play_parser.add_subparsers(dest="playbook_action", required=True)
+    play_sub.add_parser("list", help="List playbooks").set_defaults(func=cmd_playbook)
+    play_run = play_sub.add_parser("run", help="Run one playbook against an in-scope target")
+    play_run.add_argument("name")
+    play_run.add_argument("--target", required=True)
+    play_run.add_argument("--resume", action="store_true")
+    play_run.add_argument("--force", action="store_true")
+    play_run.add_argument("--review", action="store_true")
+    play_run.set_defaults(func=cmd_playbook)
+
+    rate_parser = sub.add_parser("rate", help="Show or store the scan rate profile")
+    rate_parser.add_argument("profile", nargs="?", default="show", help="show, stealth, normal, or aggressive")
+    rate_parser.set_defaults(func=cmd_rate)
+
+    set_parser = sub.add_parser("set", help="Show or store a known tool time cap")
+    set_parser.add_argument("name", nargs="?", default="")
+    set_parser.add_argument("seconds", nargs="?", default=None)
+    set_parser.set_defaults(func=cmd_set_timeout)
+
+    doctor_parser = sub.add_parser("doctor", help="Check tools, the debug log, and one target directory")
+    doctor_parser.add_argument("--target", default="")
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    tips_parser = sub.add_parser("tips", help="Search local skill notes")
+    tips_parser.add_argument("query", nargs="+")
+    tips_parser.set_defaults(func=cmd_tips)
+
+    critic_parser = sub.add_parser("critic", help="Second-pass review of a saved report")
+    critic_parser.add_argument("--target", required=True)
+    critic_parser.set_defaults(func=cmd_critic)
+
+    eval_parser = sub.add_parser("eval", help="Score C1+ findings on the C0-C4 scale")
+    eval_parser.add_argument("--target", default="")
+    eval_parser.add_argument("--limit", type=int, default=15)
+    eval_parser.add_argument("--llm", action="store_true")
+    eval_parser.set_defaults(func=cmd_eval)
+
+    inbox_parser = sub.add_parser("inbox", help="Notable findings that map to a safe prove technique")
+    inbox_parser.add_argument("--target", default="")
+    inbox_parser.set_defaults(func=cmd_inbox)
+
+    program_parser = sub.add_parser("program", help="Bug-bounty program score weights")
+    program_sub = program_parser.add_subparsers(dest="program_action", required=True)
+    program_sub.add_parser("list", help="List profiles").set_defaults(func=cmd_program)
+    program_sub.add_parser("show", help="Show the active profile").set_defaults(func=cmd_program)
+    program_set = program_sub.add_parser("set", help="Select a profile")
+    program_set.add_argument("name")
+    program_set.set_defaults(func=cmd_program)
+
+    graph_parser = sub.add_parser("graph", help="Attack graph from the findings index")
+    graph_sub = graph_parser.add_subparsers(dest="graph_action", required=True)
+    for graph_name, graph_help in (
+        ("summary", "Print graph counts"),
+        ("show", "Print counts and the first nodes"),
+    ):
+        graph_cmd = graph_sub.add_parser(graph_name, help=graph_help)
+        graph_cmd.add_argument("--target", default="")
+        graph_cmd.add_argument("--min-score", dest="min_score", type=int, default=0)
+        graph_cmd.set_defaults(func=cmd_graph)
 
     return parser
 

@@ -25,18 +25,18 @@ Tiers below match how the extras were added: **use Tier 1 first**, then 2-4.
 
 | Feature | How |
 |---------|-----|
-| Auth session (cookie A + headers) | `/session set --cookie "..." --header "Authorization: Bearer ..."` |
-| Multi-scope run | `/run --scope-all --modules subdomains,dns,httpprobe` |
+| Auth session (cookie A + headers) | `python recon.py session set --cookie "..." --header "Authorization: Bearer ..."` |
+| Multi-scope run | `python recon.py run --scope-all --modules subdomains,dns,httpprobe` |
 | JS intel (maps, routes, lib versions) | module `jsintel` |
 | API / OpenAPI / IDOR-shaped URLs | module `apis` |
 | Extra takeover (package.json, CDN 404) | module `takeover_plus` |
 | Tech-tagged nuclei pack | automatic inside `nuclei` when httpx tech matches |
 | Safe 401/403 header/path probes | module `bypass403` (no password spray) |
 
-```text
-/session set --cookie "sid=abc"
-/run example.com --modules httpprobe,crawl,js,jsintel,apis,bypass403
-/playbook run auth-surface example.com
+```bash
+python recon.py session set --cookie "sid=abc"
+python recon.py example.com --modules httpprobe,crawl,js,jsintel,apis,bypass403
+python recon.py playbook run auth-surface --target example.com
 ```
 
 ```bash
@@ -57,12 +57,12 @@ python recon.py run --scope-all --modules subdomains,dns,httpprobe
 | Well-known / robots / security.txt | module `wellknown` |
 | Scoped Shodan/Censys | module `osint` (hostname query only) |
 | GitHub/GitLab URLs + optional trufflehog | module `gitrecon` (one public repo) |
-| WAF backoff | httpprobe writes `waf_detected.txt`; Cloudflare -> `/rate stealth` |
+| WAF backoff | httpprobe writes `waf_detected.txt`; Cloudflare -> `python recon.py rate stealth` |
 
-```text
-/playbook run hunter example.com
-/playbook run ports-hint example.com
-/run example.com --modules permute,ports,wellknown,gfextra,osint,gitrecon
+```bash
+python recon.py playbook run hunter --target example.com
+python recon.py playbook run ports-hint --target example.com
+python recon.py example.com --modules permute,ports,wellknown,gfextra,osint,gitrecon
 ```
 
 ---
@@ -79,14 +79,14 @@ Set `oast_base_url` in `config/exploit_policy.json` for redirect/SSRF canaries.
 | `redirect_canary` | Redirect candidate | Bounce to OAST or `.invalid` |
 | `idor_session_diff` | IDOR-shaped URL | GET with cookie A vs cookie B |
 
-Matching recon modules: `redirect`, `cors`, `graphql` (detection), then `/prove`.
+Matching recon modules: `redirect`, `cors`, `graphql` (detection), then `python recon.py prove`.
 
-```text
-/session set --cookie "userA=..." --cookie-b "userB=..."
-/findings reindex
-/prove queue example.com
-/prove run example.com --technique cors_origin
-/prove run example.com --technique idor_session_diff
+```bash
+python recon.py session set --cookie "userA=..." --cookie-b "userB=..."
+python recon.py findings reindex
+python recon.py prove queue example.com
+python recon.py prove run --target example.com --technique cors_origin
+python recon.py prove run --target example.com --technique idor_session_diff
 ```
 
 ```bash
@@ -101,20 +101,20 @@ python recon.py prove run --target example.com --technique redirect_canary
 
 | Feature | How |
 |---------|-----|
-| HAR import | `/har import capture.har example.com` -- in-scope URLs -> `urls.txt`; Cookie -> session |
-| Target wordlist | `/wordlist-target example.com` -> `wordlist_target.txt` |
-| Resume a partial run | `/run example.com --resume` skips a finished tool file. Exit 124 runs that tool again. `--force` redoes the work. |
-| Evidence ZIP | `/evidence example.com` -> `evidence_<target>_....zip` |
+| HAR import | `python recon.py har --target example.com --file capture.har` keeps in-scope URLs in `urls.txt` and can copy a Cookie into the session |
+| Target wordlist | `python recon.py wordlist-target --target example.com` writes `wordlist_target.txt` |
+| Resume a partial run | `python recon.py example.com --resume` skips a finished tool file. Exit 124 runs that tool again. `--force` redoes the work. |
+| Evidence ZIP | `python recon.py evidence --target example.com` writes `evidence_<target>_....zip` |
 | Notify | if `notify` CLI is installed, a C1+ vuln count is sent at end of a successful run |
-| Hunter inbox | `/inbox example.com` |
+| Hunter inbox | `python recon.py inbox --target example.com` |
 
-```text
-/har import ~/Downloads/app.har example.com
-/run example.com --resume --modules crawl,js,jsintel,apis
-/findings reindex
-/inbox example.com
-/evidence example.com
-/graph show example.com
+```bash
+python recon.py har --target example.com --file ~/Downloads/app.har
+python recon.py example.com --resume --modules crawl,js,jsintel,apis
+python recon.py findings reindex
+python recon.py inbox --target example.com
+python recon.py evidence --target example.com
+python recon.py graph show --target example.com
 ```
 
 ```bash
@@ -140,7 +140,7 @@ One dnsx pass writes resolved hosts, records, and CNAME lines. httpx probes
 before naabu. tls, well-known, ports, and crawl overlap after alive.txt and
 join before js. xss, sqli, ssrf, and gfextra share one URL classification.
 
-List descriptions anytime: `/modules` or `python recon.py modules`.
+List descriptions anytime: `python recon.py modules`.
 
 Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have inputs),
 `api-surface`, `js-deep`, `ports-hint`, `content-light`, `prove-prep`,
@@ -152,9 +152,10 @@ Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have input
 
 Under `~/.reconkit/output/<target>/`:
 
-Per-tool copies (written as soon as that tool finishes -- you do not wait for the
-whole phase) live in `tools/<stage>/<tool>.txt`. The merged files below are
-updated after **each** tool, then finalized at stage end.
+Per-source lists (subdomains, crawl) are written to `tools/<stage>/<tool>.txt`
+as that tool finishes. The merge file is updated after each of those tools,
+then finalized at stage end. A stage with one result writes that file once at
+the output root and keeps the exit code under `tools/`.
 
 Example while subfinder is done and amass is still running:
 
@@ -163,24 +164,24 @@ tools/subdomains/subfinder.txt
 subdomains.txt          # already has subfinder names
 ```
 
-Amass runs with the other passive sources and is capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). dnsx, httpx,
+Amass runs with the other passive sources and is capped at 180s (`python recon.py set RECON_AMASS_TIMEOUT 900`, max 900). dnsx, httpx,
 tlsx, crawl, and each nuclei pack have their own caps (`RECON_DNSX_TIMEOUT`,
 `RECON_HTTPX_TIMEOUT`, `RECON_TLSX_TIMEOUT`, `RECON_CRAWL_TIMEOUT`,
 `RECON_NUCLEI_TIMEOUT`). A cap records exit 124 beside that tool file, and
 `--resume` runs the tool again. When httpx hits the cap and `alive.txt` already
 lists hosts, the previous host list stays. A missing httpx or crawler leaves
-`alive.txt` and `urls.txt` in place. Kill a hung scan with `/stop`.
+`alive.txt` and `urls.txt` in place. Ctrl+C stops a hung scan.
 
 `--resume` skips a finished tool file. A missing `.rc` marker counts as finished.
 An older run that has only the merged file and no `tools/<stage>/` files still
 skips that stage. `run_meta.json` records the run.
-`tech_routes.txt` lists `/prove` techniques that match files already on disk.
+`tech_routes.txt` lists prove techniques that match files already on disk.
 `param_priority.txt` is a short parameter list. `tools/<stage>/dropped.txt`
 records out-of-scope and wildcard drops (capped).
 
 `reviews/<phase>.txt` is an opt-in model note (`--review` or `RECON_SUPERVISOR=1`).
 The scan still chooses every module. The note says what landed, what to ignore,
-and which existing `/prove` technique is worth a look. `reviews/summary.txt`
+and which existing prove technique is worth a look. `reviews/summary.txt`
 is written at the end of a run that was not stopped. Read them as
 `reviews/<phase>.txt` under the target output directory.
 
@@ -203,7 +204,7 @@ Under `~/.reconkit/output/<target>/`:
 | `takeover_plus.txt` | takeover_plus |
 | `osint.txt` | osint |
 | `git_urls.txt`, `trufflehog.jsonl` | gitrecon |
-| `wordlist_target.txt` | `/wordlist-target` |
-| `evidence_*.zip` | `/evidence` |
+| `wordlist_target.txt` | `python recon.py wordlist-target` |
+| `evidence_*.zip` | `python recon.py evidence` |
 
 Session file: `~/.reconkit/session.json` (not under output/).

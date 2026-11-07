@@ -1,7 +1,7 @@
 """Assign C0–C4 confidence and workflow status on every recon record.
 
 C0 inventory / noise — hide by default
-C1 scanner candidate — needs /prove or manual
+C1 scanner candidate — needs prove or a manual check
 C2 canary confirmed by prove
 C3 impact (human)
 C4 report-ready

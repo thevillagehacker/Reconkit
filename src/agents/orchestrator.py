@@ -242,17 +242,15 @@ class ReconOrchestrator:
 
     def _print_header(self, state: ReconState) -> None:
         cfg = self.llm.config
-        print("=" * 64)
-        print(f"  Recon Agents  |  target={state.target}")
-        print(f"  LLM: provider={cfg.provider}  model={cfg.model}")
-        print(f"  outdir={state.outdir}")
-        print(f"  already completed: {state.completed_modules or '(none)'}")
-        print(f"  max_steps={self.max_steps}  dry_run={self.dry_run}")
-        print("=" * 64)
+        print(f"[*] Recon Agents  target={state.target}")
+        print(f"[*] LLM: provider={cfg.provider}  model={cfg.model}")
+        print(f"[*] outdir={state.outdir}")
+        print(f"[*] already completed: {state.completed_modules or '(none)'}")
+        print(f"[*] max_steps={self.max_steps}  dry_run={self.dry_run}")
 
     @staticmethod
     def _print_plan(step_i: int, plan: dict[str, Any]) -> None:
-        print(f"\n--- Step {step_i}: PLANNER ---")
+        print(f"[*] Step {step_i}: PLANNER")
         print(f"  done={plan.get('done')}  priority={plan.get('priority')}")
         print(f"  next_agent={plan.get('next_agent')}  modules={plan.get('modules')}")
         print(f"  technique={plan.get('technique') or 'none'}")
@@ -264,7 +262,8 @@ class ReconOrchestrator:
 
     @staticmethod
     def _print_agent_result(result) -> None:
-        print(f"\n--- Agent '{result.agent}' result (success={result.success}) ---")
+        tag = "[+]" if result.success else "[-]"
+        print(f"{tag} Agent '{result.agent}'")
         print(f"  modules_run: {result.modules_run}")
         summary = (result.summary or "").strip()
         if summary:

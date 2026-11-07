@@ -63,6 +63,19 @@ def test_unknown_command():
     kind, argv = recon.prepare(["frobnicate"])
     assert kind == "error"
     assert "frobnicate" in argv[0]
+    kind, argv = recon.prepare(["shell"])
+    assert kind == "error"
+    assert "shell" in argv[0]
+
+
+def test_workflow_commands_stay_on_the_cli():
+    assert recon.prepare(["playbook", "list"]) == ("recon", ["playbook", "list"])
+    assert recon.prepare(["rate", "stealth"]) == ("recon", ["rate", "stealth"])
+    assert recon.prepare(["set", "RECON_AMASS_TIMEOUT", "900"]) == (
+        "recon",
+        ["set", "RECON_AMASS_TIMEOUT", "900"],
+    )
+    assert recon.prepare(["graph", "show", "--target", "example.com"])[0] == "recon"
 
 
 def test_help_and_empty():
@@ -79,5 +92,6 @@ if __name__ == "__main__":
     test_findings_and_prove_shortcuts()
     test_agents_list_and_scan()
     test_unknown_command()
+    test_workflow_commands_stay_on_the_cli()
     test_help_and_empty()
     print("ok")

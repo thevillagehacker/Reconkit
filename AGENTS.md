@@ -1,6 +1,6 @@
 # Agents, prove, programs, graph & skills -- v3.0.0
 
-CLI is the engine. Findings, proofs, and the attack graph are shell commands.
+CLI is the engine. Findings, proofs, and the attack graph are `recon.py` commands.
 
 ## Read these first
 
@@ -16,60 +16,62 @@ CLI is the engine. Findings, proofs, and the attack graph are shell commands.
 
 ```bash
 cd path/to/Reconkit
-pip install prompt_toolkit colorama
+pip install colorama
 
-python recon.py shell
-# LIVE autocomplete: type /co -> /commands /config
-# /run T --modules  -> module list  /  /keys set  -> key names
-
+python recon.py example.com
+python recon.py modules
+python recon.py keys set PDCP_API_KEY <token>
 python recon.py --version
 ```
 
-## Shell map (high level)
+## Command map
 
 ```text
-/setup /verify /wordlists
-/scope add|list|check
-/keys set|list|remove
-/session show|set|clear
-/har import  /inbox  /evidence  /wordlist-target
-/target /verbose /rate
-/run /quick /full /scan /playbook /view   # background by default; --fg blocks; --review writes phase notes
-/pause /resume /stop /jobs
-/findings reindex
-/program list|show|set
-/notable /diff /doctor /tips
-/prove policy|techniques|queue|run|list|show
-/graph summary|show
-/report /critic
-/config ...  /check-llm  /agent ...
+python recon.py setup | verify | wordlists
+python recon.py scope add|list|check
+python recon.py keys set|list|remove
+python recon.py session show|set|clear
+python recon.py har | inbox | evidence | wordlist-target
+python recon.py rate | set
+python recon.py <target> [--modules a,b] [--resume] [--review]
+python recon.py playbook list|run
+python recon.py view <target>
+python recon.py findings reindex
+python recon.py program list|show|set
+python recon.py notable | diff | doctor | tips
+python recon.py prove policy|techniques|queue|run|list|show
+python recon.py graph summary|show
+python recon.py report | critic
+python recon.py agents ...
 ```
 
-Every command: `/cmd -h`. Full catalog: **[USAGE.md](USAGE.md)**.  
-Scan progress: one bar per tool finish (`progress_ui.py`); bg jobs use log mode.
+Every command: `python recon.py help <command>`. Full catalog: **[USAGE.md](USAGE.md)**.  
+Scan progress: one in-place running line on a terminal, then one result row per finished tool, then one summary (`progress_ui.py`). Warnings print on their own line. Ctrl+C stops the scan.
 
 ## Program profiles
 
-```text
-/program list
-/program set example-web
-/findings reindex
-/notable
+```bash
+python recon.py program list
+python recon.py program set example-web
+python recon.py findings reindex
+python recon.py notable --target example.com
 ```
 
 Files: `config/programs/*.json`  /  env: `RECON_PROGRAM=...`
 
 ## Prove (safe)
 
-```text
-/prove policy
-/prove queue example.com
-/prove run example.com --dry-run
-/prove run example.com
-/prove run example.com --technique xss_reflect
-/prove run example.com --technique cors_origin
-/prove run example.com --technique idor_session_diff   # needs /session cookie-A and cookie-B
+```bash
+python recon.py prove policy
+python recon.py prove queue --target example.com
+python recon.py prove run --target example.com --dry-run
+python recon.py prove run --target example.com
+python recon.py prove run --target example.com --technique xss_reflect
+python recon.py prove run --target example.com --technique cors_origin
+python recon.py prove run --target example.com --technique idor_session_diff
 ```
+
+`idor_session_diff` needs cookie A and cookie B from `python recon.py session set`.
 
 ```bash
 python recon.py prove run --target example.com
@@ -80,9 +82,9 @@ Maps to confidence **C2** when confirmed (see skill suite below).
 
 ## Graph
 
-```text
-/graph show example.com
-/graph summary example.com --min-score 40
+```bash
+python recon.py graph show --target example.com
+python recon.py graph summary --target example.com --min-score 40
 ```
 
 ## LLM agents (local + cloud)
@@ -122,13 +124,13 @@ python recon.py agents run --target example.com --dry-run
 python recon.py agents run --target example.com --provider xai --model grok-2-latest
 ```
 
-```text
-/config set --provider xai --model grok-2-latest
-/config set --provider anthropic --model claude-sonnet-4-20250514
-/config set --provider ollama --base-url http://192.168.1.4:11434 --model qwen3:8b
-/check-llm
-/agents
-/agent example.com --max-steps 8
+```bash
+python recon.py agents config set --provider xai --model grok-2-latest
+python recon.py agents config set --provider anthropic --model claude-sonnet-4-20250514
+python recon.py agents config set --provider ollama --base-url http://192.168.1.4:11434 --model qwen3:8b
+python recon.py agents check-llm
+python recon.py agents
+python recon.py agents run --target example.com --max-steps 8
 ```
 
 **Cloud setup (full walkthrough):** **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)**  
@@ -147,7 +149,7 @@ python recon.py agents run --target example.com --max-steps 8
 
 Or: `copy config\agent_config.cloud-example.json config\agent_config.json` then set the key env.
 
-VM -> Windows Ollama: host IP only (not Kali IP). Always use **`--flag`** form for `/config set`.
+VM -> Windows Ollama: host IP only (not Kali IP). Always use the `--flag` form for `agents config set`.
 
 ## Agent skill suite
 
@@ -161,7 +163,7 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 | `reconkit-bug-bounty` | Master pipeline + scope rules |
 | `reconkit-efficiency` | Local/cloud token budgets (<=3 modules/step) |
 | `reconkit-fp-eval` | C0-C4 tiers, kill-fast FPs |
-| `reconkit-exploit-prove` | Canary PoCs + `/prove` technique map |
+| `reconkit-exploit-prove` | Canary PoCs + prove technique map |
 | `reconkit-triage-gate` | Pre-report 7-gate / N/A prevention |
 
 | Role | Skill files loaded for that call |
@@ -190,7 +192,7 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 
 ```text
 C0 noise -> drop
-C1 scanner -> /prove or manual
+C1 scanner -> prove or manual
 C2 canary confirmed -> PoC draft
 C3 impact (human) -> triage-gate
 C4 report-ready
@@ -208,7 +210,7 @@ python recon.py agents    # shows suite by role + surface list
 
 Hunting prompts in `skills/bug-bounty-hunting-prompts/phases/` are attached
 in full, unchanged. The planner loads the surface-map phase, and the scope
-phase after crawl, js, or screenshots. The analyst loads triage. `/critic`
+phase after crawl, js, or screenshots. The analyst loads triage. `critic`
 loads the triage-gate phase. `python recon.py agents` prints the map.
 
 ### Worked example
@@ -218,12 +220,12 @@ loads the triage-gate phase. `python recon.py agents` prints the map.
 python recon.py agents run --target example.com --modules xss --max-steps 4
 python recon.py findings reindex
 python recon.py prove run --target example.com --technique xss_reflect
-# confirmed proof ~= C2; write impact manually for C3; /critic for triage-gate
+# confirmed proof ~= C2; write impact manually for C3; critic for triage-gate
 ```
 
 Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[USAGE.md](USAGE.md#11-agent-skills)**.
 
-**Exploit path:** C1 -> `/prove` (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
+**Exploit path:** C1 -> prove (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
 No reverse shells / dumps / spray lists in the default path.
 
 ## Safety

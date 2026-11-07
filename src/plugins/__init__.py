@@ -4,7 +4,7 @@ Optional plugin hooks (Tier D).
 Drop a module in plugins/ that defines:
   COMMANDS = [{"name": "...", "usage": "...", "summary": "...", "handler": callable}]
 
-Shell loads these at startup if present. Core works without any plugins.
+The CLI does not load these. Core recon runs without any plugins.
 """
 
 from __future__ import annotations

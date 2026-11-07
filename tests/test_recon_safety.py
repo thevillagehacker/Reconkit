@@ -37,15 +37,14 @@ def test_asset_diff_highlights_only_changes(tmp: Path):
 
     reconkit.snapshot_prev(tmp / "subdomains.txt")
     reconkit.write_host_list(tmp / "subdomains.txt", ["a.example.com", "c.example.com"])
+    (tmp / "diff_assets.md").write_text("# old\n", encoding="utf-8")
     reconkit.update_asset_diff(tmp, "subdomains.txt")
     second = json.loads((tmp / "diff_assets.json").read_text(encoding="utf-8"))
     section = second["files"]["subdomains.txt"]
     assert section["first_run"] is False
     assert section["new"] == ["c.example.com"]
     assert section["removed"] == ["b.example.com"]
-    text = (tmp / "diff_assets.md").read_text(encoding="utf-8")
-    assert "c.example.com" in text
-    assert "b.example.com" in text
+    assert not (tmp / "diff_assets.md").exists()
 
 
 def test_httpx_line_keeps_status_title_and_hash():
@@ -126,18 +125,24 @@ def test_capped_probe_keeps_previous_alive(tmp: Path):
     alive.write_text("https://a.example.com [200] [App]\nhttps://b.example.com [200] [Other]\n", encoding="utf-8")
     original_which, original_pipe = reconkit.which, reconkit.pipe_into
 
-    def pipe(*_args, **_kwargs):
+    def pipe(*_args, **kwargs):
         reconkit._LAST_PIPE_RC.set(124)
-        return b"https://a.example.com [200] [App]\n"
+        body = b"https://a.example.com [200] [App]\n"
+        reconkit.save_tool_raw(kwargs["outdir"], "httpprobe", "httpx", body)
+        reconkit.write_tool_rc(kwargs["outdir"], "httpprobe", "httpx", 124)
+        return body
 
     reconkit.which = lambda name: "httpx" if name == "httpx" else None
     reconkit.pipe_into = pipe
     try:
         reconkit.stage_httpprobe(subs, outdir)
+        partial = outdir / "tools" / "httpprobe" / "httpx.txt"
+        assert partial.is_file()
+        assert "a.example.com" in partial.read_text(encoding="utf-8")
         os.environ["RECON_RESUME"] = "1"
-        reconkit.save_tool_raw(outdir, "httpprobe", "httpx", "https://a.example.com [200] [App]\n")
-        reconkit.write_tool_rc(outdir, "httpprobe", "httpx", 124)
-        assert reconkit.should_skip_tool(outdir, "httpprobe", "httpx", subs) is False
+        assert reconkit.should_skip_tool(
+            outdir, "httpprobe", "httpx", subs, canonical=alive,
+        ) is False
     finally:
         reconkit.which = original_which
         reconkit.pipe_into = original_pipe
@@ -255,6 +260,61 @@ def test_wildcard_drop_needs_the_same_body_hash(tmp: Path):
     assert "sink.wild.example.com" not in text
 
 
+def test_finished_probe_is_stored_once(tmp: Path):
+    import reconkit
+
+    outdir = tmp / "example.com"
+    outdir.mkdir()
+    subs = outdir / "subdomains.txt"
+    subs.write_text("a.example.com\n", encoding="utf-8")
+    (outdir / "alive_urls.txt").write_text("https://stale.example.com\n", encoding="utf-8")
+    (outdir / "httpprobe.json").write_text("{}\n", encoding="utf-8")
+    original_which, original_pipe = reconkit.which, reconkit.pipe_into
+
+    def pipe(*_args, **kwargs):
+        reconkit._LAST_PIPE_RC.set(0)
+        body = b"https://a.example.com [200] [App]\n"
+        reconkit.save_tool_raw(kwargs["outdir"], "httpprobe", "httpx", body)
+        reconkit.write_tool_rc(kwargs["outdir"], "httpprobe", "httpx", 0)
+        return body
+
+    reconkit.which = lambda name: "httpx" if name == "httpx" else None
+    reconkit.pipe_into = pipe
+    try:
+        reconkit.stage_httpprobe(subs, outdir)
+        alive = outdir / "alive.txt"
+        assert "a.example.com" in alive.read_text(encoding="utf-8")
+        assert not (outdir / "tools" / "httpprobe" / "httpx.txt").exists()
+        rc = (outdir / "tools" / "httpprobe" / "httpx.txt.rc").read_text(encoding="utf-8")
+        assert rc.strip() == "0"
+        assert not (outdir / "alive_urls.txt").exists()
+        assert not (outdir / "httpprobe.json").exists()
+        os.environ["RECON_RESUME"] = "1"
+        assert reconkit.should_skip_tool(
+            outdir, "httpprobe", "httpx", subs, canonical=alive,
+        ) is True
+        reconkit.stage_httpprobe(subs, outdir)
+        assert "a.example.com" in alive.read_text(encoding="utf-8")
+    finally:
+        reconkit.which = original_which
+        reconkit.pipe_into = original_pipe
+        os.environ.pop("RECON_RESUME", None)
+
+
+def test_review_samples_the_root_file_once(tmp: Path):
+    from agents.supervisor import _collect
+
+    outdir = tmp / "example.com"
+    (outdir / "tools" / "httpprobe").mkdir(parents=True)
+    (outdir / "alive.txt").write_text("https://a.example.com [200]\n", encoding="utf-8")
+    (outdir / "tools" / "httpprobe" / "httpx.txt").write_text(
+        "https://a.example.com [200]\n", encoding="utf-8",
+    )
+    samples, _dropped_lines, _dropped_count, _omitted, _context = _collect(outdir, "httpprobe")
+    rels = [sample.rel.replace("\\", "/") for sample in samples]
+    assert rels == ["alive.txt"]
+
+
 def test_output_path_cannot_escape():
     import reconkit
 
@@ -280,6 +340,10 @@ if __name__ == "__main__":
         test_missing_httpx_keeps_alive(Path(directory))
     with tempfile.TemporaryDirectory() as directory:
         test_capped_probe_keeps_previous_alive(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_finished_probe_is_stored_once(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
+        test_review_samples_the_root_file_once(Path(directory))
     with tempfile.TemporaryDirectory() as directory:
         test_missing_crawlers_keep_urls(Path(directory))
     with tempfile.TemporaryDirectory() as directory:

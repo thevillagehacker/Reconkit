@@ -118,7 +118,7 @@ def build_report_md(
         "## Next steps (manual)",
         "",
         "1. Confirm each item is in scope and within program rules.",
-        "2. Reproduce high/critical with your own methodology (or run `/prove`).",
+        "2. Reproduce high/critical with your own methodology (or run `python recon.py prove <target>`).",
         "3. Do not treat automated detection as full exploitability without proof.",
         "",
     ]

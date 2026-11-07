@@ -4,13 +4,11 @@ Live scan progress for reconkit — spam-proof bars + tool checklist.
 Two progress modes (auto-selected):
 
   live  — exclusive foreground TTY: one short line rewritten with \\r
-  log   — background job / shared TTY / pipe: start + rare heartbeats + end
-          (NO \\r animation — that races the shell prompt and spams rows)
+  log   — pipe, or RECONKIT_BG=1: one finish row when a tool ends
+          (no \\r animation)
 
-Root cause of "lots of Hosts (dns) rows" on Linux:
-  /run defaults to a background thread. LiveHUD kept doing \\r redraws while
-  prompt_toolkit also owned the TTY → each frame became a new line.
-  Fake host_total without updates made it look like 0/2112 forever.
+A foreground scan owns the terminal and rewrites one running line.
+Log mode stays quiet until a tool finishes.
 """
 
 from __future__ import annotations
@@ -76,7 +74,7 @@ PHASE_TITLE = {
 }
 
 try:
-    from shell.fleet_art import MODULE_SHIP_META as _SHIP_META, ship_lines as _ship_lines
+    from fleet_art import MODULE_SHIP_META as _SHIP_META, ship_lines as _ship_lines
 except Exception:  # pragma: no cover
     _SHIP_META = {
         "subdomains": ("Subdomain enum", "passive"),
@@ -135,14 +133,18 @@ def fleet_ship_color(phase: str) -> str:
     return _ACCENT
 
 
+def _mark(tag: str, color: str) -> str:
+    if _color_on():
+        return f"{_BOLD}{color}{tag}{_R}"
+    return tag
+
+
 def fleet_ship_line(phase: str, detail: str = "") -> str:
     """One-line phase header for pipeline stages."""
     key = (phase or "default").lower().strip()
     name, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
     extra = f"  {detail}" if detail else ""
-    if _color_on():
-        return f"  {_BOLD}{_ACCENT}{name}{_R}  {_GRAY}{klass}{extra}{_R}"
-    return f"  {name}  {klass}{extra}"
+    return f"{_mark('[*]', _CYAN)} {name}  {klass}{extra}"
 
 
 def print_module_ship_banner(
@@ -158,15 +160,10 @@ def print_module_ship_banner(
     key = (phase or "default").lower().strip()
     del detail
     name, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
-    idx = f"{index}/{total}  " if total else ""
+    idx = f"{index}/{total} " if total else ""
 
     with _IO:
-        print()
-        if _color_on():
-            amber = "\033[38;5;179m"
-            print(f"  {_GRAY}{idx}{_R}{_BOLD}{_ACCENT}{name}{_R}  {amber}{klass}{_R}")
-        else:
-            print(f"  {idx}{name}  {klass}")
+        print(f"{_mark('[*]', _CYAN)} {idx}{name}  {klass}")
         sys.stdout.flush()
 
 _IO = threading.RLock()
@@ -185,27 +182,23 @@ _STATE: dict = {
 _ACTIVE_HUD: "LiveHUD | ToolChecklist | None" = None
 _HUD_LOCK = threading.Lock()
 _VT_READY = False
+_WRITE_THROUGH = False
 
 
 def progress_mode() -> str:
     """
-    live — multi-line friendly exclusive TTY (foreground)
-    log  — background job: still animates ONE \\r spinner line when TTY
+    live — exclusive foreground TTY: one line rewritten with \\r
+    log  — background job or pipe: full lines above the prompt
     off  — silent
 
-    Background jobs used to disable all animation (static "running…"), which
-    looked broken. We still avoid multi-bar spam in log mode, but a single
-    carriage-return spinner is safe and expected by users.
+    RECONKIT_BG=1 or RECONKIT_PROGRESS=log forces log mode: one finish row
+    per tool, no spinner. A foreground scan always rewrites one running line.
+    isatty() is not required. Some consoles report a non-TTY and the spinner
+    then never started, including during a long tool such as findomain.
     """
     forced = (os.environ.get("RECONKIT_PROGRESS") or "").strip().lower()
-    try:
-        tty = bool(sys.stdout.isatty())
-    except Exception:
-        tty = False
     if forced == "off":
         return "off"
-    if not tty:
-        return "log"
     if forced in ("live", "log"):
         return forced
     if os.environ.get("RECONKIT_BG") == "1":
@@ -214,13 +207,33 @@ def progress_mode() -> str:
 
 
 def can_animate() -> bool:
-    """True when a single-line \\r spinner is allowed (real TTY, not off)."""
-    if progress_mode() == "off":
-        return False
+    """True when this scan should rewrite one spinner and progress bar."""
+    return progress_mode() == "live"
+
+
+def prepare_foreground_progress() -> None:
+    """A foreground scan owns the terminal.
+
+    RECONKIT_BG=1 is left over from background jobs. It forces log mode, so
+    the spinner never starts. RECONKIT_PROGRESS=log still opts out.
+    """
+    os.environ.pop("RECONKIT_BG", None)
+
+
+def _enable_write_through() -> None:
+    """Push each spinner write out immediately.
+
+    A block-buffered stdout holds the carriage-return row until the next
+    newline, which is the finish line that clears it. The row never appears.
+    """
+    global _WRITE_THROUGH
+    if _WRITE_THROUGH:
+        return
+    _WRITE_THROUGH = True
     try:
-        return bool(sys.stdout.isatty())
+        sys.stdout.reconfigure(write_through=True)
     except Exception:
-        return False
+        pass
 
 
 def _ensure_vt() -> None:
@@ -229,6 +242,7 @@ def _ensure_vt() -> None:
     if _VT_READY:
         return
     _VT_READY = True
+    _enable_write_through()
     if os.name != "nt":
         return
     try:
@@ -276,6 +290,11 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
+# Bright cyan, green, yellow, magenta. One SGR each so the glyph stays
+# colored on Windows Terminal (a second code can drop the first).
+_SPIN_COLORS = ("\033[1;96m", "\033[1;92m", "\033[1;93m", "\033[1;95m")
+
+
 def anim_block(frame: int, style: str = "thinking") -> str:
     if style == "block":
         ch = _ANIM_BLOCKS[frame % len(_ANIM_BLOCKS)]
@@ -283,8 +302,7 @@ def anim_block(frame: int, style: str = "thinking") -> str:
         ch = _ANIM_BRAILLE[frame % len(_ANIM_BRAILLE)]
     if not _color_on():
         return ch
-    colors = (_CYAN, _MAGENTA, _RED, _YELLOW)
-    return f"{_BOLD}{colors[frame % 4]}{ch}{_R}"
+    return f"{_SPIN_COLORS[frame % len(_SPIN_COLORS)]}{ch}{_R}"
 
 
 def think_dots(frame: int) -> str:
@@ -437,37 +455,14 @@ def scan_log(
 ) -> None:
     if verbose < min_level:
         return
-    hud = None
-    with _HUD_LOCK:
-        hud = _ACTIVE_HUD
-    # Park any live bar line so the log doesn't collide with \\r
-    if hud is not None and hasattr(hud, "park"):
-        try:
-            hud.park()
-        except Exception:
-            pass
-
-    ts = _ts()
-    block = anim_block(frame) if anim else ("·" if not _color_on() else f"{_GRAY}·{_R}")
+    del frame, anim
     lvl = level.upper()[:3]
-    if _color_on():
-        lc = {
-            "INF": _CYAN, "OK": _GREEN, "WRN": _YELLOW,
-            "ERR": _RED, "DBG": _MAGENTA, "RUN": _YELLOW,
-        }.get(lvl, _WHITE)
-        line = f"{_GRAY}[{ts}]{_R} {block} {_GRAY}[{_R}{_BOLD}{lc}{lvl}{_R}{_GRAY}]{_R} {msg}"
-    else:
-        line = f"[{ts}] {block} [{lvl}] {msg}"
-    with _IO:
-        # Finish any open \\r bar line first
-        sys.stdout.write("\n" if getattr(hud, "_bar_open", False) else "")
-        if hud is not None:
-            try:
-                setattr(hud, "_bar_open", False)
-            except Exception:
-                pass
-        print(line)
-        sys.stdout.flush()
+    tag, color = {
+        "OK": ("[+]", _GREEN),
+        "WRN": ("[!]", _YELLOW),
+        "ERR": ("[-]", _RED),
+    }.get(lvl, ("[*]", _CYAN))
+    hud_print(f"{_mark(tag, color)} {msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -485,36 +480,98 @@ def _truncate_plain(text: str, max_plain: int) -> str:
     return plain[: max_plain - 1] + "…"
 
 
-def _write_bar_line(text: str, *, open_cr: bool = True) -> None:
+def _live_width() -> int:
+    """Columns for the spinner row.
+
+    Stay at or under 78. A size query that returns the 100-column fallback
+    on an 80-column window wraps the row, and the next carriage return
+    updates the wrapped tail. The status then looks blank.
+    """
+    return max(24, min(78, _term_cols() - 2))
+
+
+def _rewrite_line(text: str) -> None:
+    """Replace the current row. No newline, so the row stays in place.
+
+    Draw the text, then erase to the end of the line. Erasing the whole
+    line before the text left the row blank on Windows Terminal: the erase
+    was applied and the text in the same write never showed. Padding the
+    row out to the terminal width caused the same miss when the pad wrapped.
+    """
+    _ensure_vt()
+    fitted = _truncate_plain(text, _live_width())
+    with _IO:
+        sys.stdout.write("\r" + fitted + "\033[K")
+        sys.stdout.flush()
+
+
+def _write_bar_line(text: str, *, open_cr: bool = True, hud=None) -> None:
     """
     Write/replace ONE status line with \\r (spinner / elapsed).
 
-    Used for both foreground and background scans when stdout is a TTY.
-    Only one physical line — never multi-line cursor math (that caused spam).
+    Only one physical line. The cursor stays on that row. The next real
+    log line must go through hud_print(), which erases this row first.
     """
     _ensure_vt()
-    # Cap well under terminal width so the line cannot wrap (\\r fails on wrap).
-    cols = min(100, _term_cols())
-    max_plain = max(40, cols - 2)
-    fitted = _truncate_plain(text, max_plain)
+    fitted = _truncate_plain(text, _live_width())
     with _IO:
         if open_cr and can_animate():
-            # Clear line + rewrite. Never emit \\n here.
-            # Pad with spaces to wipe longer previous frames.
-            plain_len = len(_plain(fitted))
-            pad = max(0, max_plain - plain_len)
-            sys.stdout.write("\r\033[2K" + fitted + (" " * pad))
-            sys.stdout.write("\r" + fitted)  # leave cursor at end of content
+            _rewrite_line(fitted)
+            if hud is not None:
+                hud._bar_open = True
         else:
             sys.stdout.write(fitted + "\n")
-        sys.stdout.flush()
+            if hud is not None:
+                hud._bar_open = False
+            sys.stdout.flush()
+
+
+def hud_print(text: str) -> None:
+    """Print one log line without gluing it onto the live spinner.
+
+    The spinner is a carriage-return row. A plain print() continues that
+    row, so warnings showed up at the end of `running`. Erase the spinner
+    first, while the animator cannot repaint, then write the message.
+    """
+    _ensure_vt()
+    hud = None
+    with _HUD_LOCK:
+        hud = _ACTIVE_HUD
+    lock = getattr(hud, "_anim_lock", None) if hud is not None else None
+    acquired = False
+    if lock is not None:
+        lock.acquire()
+        acquired = True
+    try:
+        with _IO:
+            if hud is not None and getattr(hud, "_bar_open", False) and can_animate():
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                try:
+                    hud._bar_open = False
+                except Exception:
+                    pass
+            print(text)
+            sys.stdout.flush()
+    finally:
+        if acquired and lock is not None:
+            lock.release()
+    # The warning took the spinner's line. Put the spinner back while work continues.
+    if hud is not None and can_animate() and not getattr(hud, "_closed", False):
+        resume = getattr(hud, "_paint_running", None) or getattr(hud, "_paint", None)
+        if resume is not None:
+            try:
+                resume()
+            except Exception:
+                pass
 
 
 def _clear_cr_line() -> None:
     """Erase the current \\r status line without printing a permanent row."""
     with _IO:
         if can_animate():
-            sys.stdout.write("\r\033[2K")
+            _enable_write_through()
+            sys.stdout.write("\r\033[K")
             sys.stdout.flush()
 
 
@@ -541,19 +598,18 @@ class _ToolRow:
 
 class ToolChecklist:
     """
-    One row per tool. Progress bar is embedded in the finish line only.
+    One row per tool. The row number counts finishes, in the order they print.
 
-    Example (what you want):
+    Example:
 
-      [15:37:50] ▸ Subdomain enum · hackerone.com  (8 tools)
-        … [1/8] subfinder     running…
-        ✓ [1/8] subfinder     45   |██░░░░░░░░|  12%  00:00:31
-        … [2/8] amass         running…
-        ✓ [2/8] amass          0   |████░░░░░░|  25%  00:00:31
-        …
-        ✔ 7 ok · 1 skip · 00:02:30
+      [*] 1/6 Subdomain enum  passive
+      [+]  1/8  subfinder           45  00:00:31
+      [+]  2/8  amass                0  00:01:02
+      [+]  8/8 tools  7 ok · 1 skip  00:02:30
 
-    Never prints a free-floating bar row by itself (that caused multi-bar spam).
+    The phase banner is the only header. Warnings print on their own
+    line. A finished tool row does not carry the bar. A foreground TTY
+    rewrites one running line in place. A background job does not.
     """
 
     def __init__(
@@ -603,24 +659,10 @@ class ToolChecklist:
             host_total=0,
         )
 
-        ts = _ts()
-        n = len(self.rows)
-        if _color_on():
-            head = (
-                f"{_GRAY}[{ts}]{_R}  {_BOLD}{_CYAN}▸{_R}  "
-                f"{_BOLD}{self.title}{_R}  {_GRAY}({n} tools){_R}"
-            )
-        else:
-            head = f"[{ts}]  ▸  {self.title}  ({n} tools)"
-        with _IO:
-            print(head)
-            sys.stdout.flush()
-
         self._started = True
         self._stop.clear()
         self._t0 = time.time()
         self._frame = 0
-        # Spinner thread whenever we have a TTY (bg or fg) — single \\r line only
         if can_animate():
             self._thread = threading.Thread(
                 target=self._loop_live, name="tool-checklist", daemon=True
@@ -684,8 +726,6 @@ class ToolChecklist:
             self._frame = 0
             if can_animate():
                 self._paint_running_unlocked()
-            else:
-                self._print_result_line(name, temporary_running=True)
 
     def finish_tool(
         self,
@@ -696,32 +736,50 @@ class ToolChecklist:
         skipped: bool = False,
         detail: str = "",
     ) -> None:
-        if skipped:
-            self.set(name, status="skip", value="skip", detail=detail)
-        elif not ok:
-            self.set(name, status="fail", value="fail", detail=detail)
-        else:
-            val = "0" if count is None else str(count)
-            self.set(name, status="done", value=val, detail=detail)
-        done = sum(1 for r in self.rows if r.status in ("done", "skip", "fail"))
-        update_pipeline_state(module_current=done, module_total=len(self.rows))
-
-        # Stop spinner, erase its line, print ONE permanent result (no ghost rows)
+        # Status, index, and the printed row stay together so two tools
+        # finishing at once cannot share a number or land on the spinner.
         with self._anim_lock:
-            if self._current_running == name:
-                self._current_running = None
+            if skipped:
+                self.set(name, status="skip", value="skip", detail=detail)
+            elif not ok:
+                self.set(name, status="fail", value="fail", detail=detail)
+            else:
+                val = "0" if count is None else str(count)
+                self.set(name, status="done", value=val, detail=detail)
+            done = self._done_count()
+            update_pipeline_state(module_current=done, module_total=len(self.rows))
+            # One fast tool used to clear _current_running and kill the
+            # spinner while slower tools (findomain, amass) were still running.
+            self._current_running = self._next_running()
             if self._bar_open:
                 _clear_cr_line()
                 self._bar_open = False
-            self._print_result_line(name, temporary_running=False)
+            # Completion order, not list position. Parallel tools finish
+            # out of order; a jumping 9/9 then 2/9 reads as a broken counter.
+            # The spinner does not use this number, so it cannot collide.
+            self._print_result_line(name, shown_index=done)
+            if self._current_running and can_animate():
+                self._paint_running_unlocked()
+
+    def _next_running(self) -> str | None:
+        for row in self.rows:
+            if row.status == "running":
+                return row.name
+        return None
 
     def _done_count(self) -> int:
         return sum(1 for r in self.rows if r.status in ("done", "skip", "fail"))
 
-    def _print_result_line(self, name: str, *, temporary_running: bool = False) -> None:
+    def _print_result_line(
+        self,
+        name: str,
+        *,
+        temporary_running: bool = False,
+        shown_index: int | None = None,
+    ) -> None:
         """
-        Permanent tool row. Running snapshot only used for non-TTY.
-        Animated TTY path never leaves a permanent "running" row.
+        Permanent finish row. A running snapshot is only printed when a
+        caller asks for it. Log mode prints nothing until the tool finishes.
         """
         if self.verbose < 0:
             return
@@ -729,84 +787,80 @@ class ToolChecklist:
         if row is None:
             return
         total = max(1, len(self.rows))
-        if temporary_running:
-            idx = min(total, self._done_count() + 1)
-        else:
-            idx = max(1, self._done_count())
-            idx = min(idx, total)
-        pct = _pct(self._done_count() if not temporary_running else max(0, idx - 1), total)
-        if not temporary_running:
-            pct = _pct(self._done_count(), total)
         elapsed = _fmt_elapsed(time.time() - self._t0)
         nw = self._name_w
+        iw = len(f"{total}/{total}")
+        if shown_index is None:
+            idx_s = " " * iw
+        else:
+            idx_s = f"{shown_index}/{total}".rjust(iw)
 
         if temporary_running:
-            line = f"  …  {idx}/{total}  {name:<{nw}}  running…  {elapsed}"
+            line = (
+                f"{_mark('[*]', _CYAN)}  {idx_s}  {name:<{nw}}  "
+                f"running  {elapsed}"
+            )
         else:
-            bar = cyber_bar(pct, width=18, color=(
-                "green" if row.status == "done" else
-                "red" if row.status == "fail" else "blue"
-            ))
-            icon = {"done": "✓", "skip": "–", "fail": "✗"}.get(row.status, "·")
+            icon, color = {
+                "done": ("[+]", _GREEN),
+                "skip": ("[*]", _CYAN),
+                "fail": ("[-]", _RED),
+            }.get(row.status, ("[*]", _CYAN))
             val = row.value
             detail = f"  {row.detail}" if row.detail else ""
-            if _color_on():
-                ic = {
-                    "done": _GREEN, "skip": _GRAY, "fail": _RED,
-                }.get(row.status, _WHITE)
-                line = (
-                    f"  {_BOLD}{ic}{icon}{_R}  {_GRAY}{idx}/{total}{_R}  "
-                    f"{_BOLD}{_WHITE}{name:<{nw}}{_R}  "
-                    f"{ic}{val:>6}{_R}  {bar}  {_BOLD}{pct:3.0f}%{_R}  "
-                    f"{_GRAY}{elapsed}{_R}{_GRAY}{detail}{_R}"
-                )
-            else:
-                line = (
-                    f"  {icon}  {idx}/{total}  {name:<{nw}}  "
-                    f"{val:>6}  {bar}  {pct:3.0f}%  {elapsed}{detail}"
-                )
+            line = (
+                f"{_mark(icon, color)}  {idx_s}  {name:<{nw}}  "
+                f"{val:>7}  {elapsed}{detail}"
+            )
 
         with _IO:
             print(line)
             sys.stdout.flush()
 
+    def _running_label(self) -> str:
+        names = [r.name for r in self.rows if r.status == "running"]
+        if not names and self._current_running:
+            names = [self._current_running]
+        label = ", ".join(names) if names else "…"
+        if len(label) > 36:
+            label = label[:35] + "…"
+        return label
+
     def _running_text(self) -> str:
-        """Compact spinner line — no progress bar (avoids broken dual bars)."""
-        name = self._current_running or "…"
+        """Spinner, bar, and the tools still in progress.
+
+        The count is how many tools have finished. It is not the finish-row
+        index, so a live `0/9` is not a second copy of `✓ 1/9`.
+        """
+        done = self._done_count()
         total = max(1, len(self.rows))
-        idx = min(total, self._done_count() + 1)
+        pct = _pct(done, total)
+        bar = cyber_bar(pct, width=10, color="cyan")
+        counts = f"{done}/{total}".rjust(len(f"{total}/{total}"))
         elapsed = _fmt_elapsed(time.time() - self._t0)
         spin = anim_block(self._frame)
-        nw = self._name_w
+        label = self._running_label()
         try:
             from run_control import CONTROL
             paused = CONTROL.is_paused()
         except Exception:
             paused = False
         tag = "paused" if paused else "running"
-        dots = think_dots(self._frame // 2)
+        mark = _mark("[*]", _CYAN)
         if _color_on():
             return (
-                f"  {spin}  {_GRAY}{idx}/{total}{_R}  "
-                f"{_BOLD}{_WHITE}{name:<{nw}}{_R}  "
-                f"{_YELLOW}{tag}{dots}{_R}  {_GRAY}{elapsed}{_R}"
+                f"{mark} {spin} {bar} {_GRAY}{counts}{_R} {pct:3.0f}%  "
+                f"{_BOLD}{_WHITE}{label}{_R}  "
+                f"{_YELLOW}{tag}{_R}  {_GRAY}{elapsed}{_R}"
             )
-        return f"  {spin}  {idx}/{total}  {name:<{nw}}  {tag}{dots}  {elapsed}"
+        return f"{mark} {spin} {bar} {counts} {pct:3.0f}%  {label}  {tag}  {elapsed}"
 
     def _paint_running_unlocked(self) -> None:
+        if not self._current_running:
+            self._current_running = self._next_running()
         if not self._current_running or not can_animate():
             return
-        # _write_bar_line takes _IO; we're under _anim_lock already
-        text = self._running_text()
-        _ensure_vt()
-        cols = min(100, _term_cols())
-        max_plain = max(40, cols - 2)
-        fitted = _truncate_plain(text, max_plain)
-        plain_len = len(_plain(fitted))
-        pad = max(0, max_plain - plain_len)
-        with _IO:
-            sys.stdout.write("\r\033[2K" + fitted + (" " * pad))
-            sys.stdout.flush()
+        _rewrite_line(self._running_text())
         self._bar_open = True
 
     def _paint_running(self) -> None:
@@ -814,11 +868,21 @@ class ToolChecklist:
             self._paint_running_unlocked()
 
     def _loop_live(self) -> None:
-        """Single-line \\r spinner + elapsed for the current tool (bg or fg)."""
+        """Keep one spinner row on screen while any tool is still running."""
         while not self._stop.is_set():
-            if self._current_running:
-                self._frame += 1
-                self._paint_running()
+            try:
+                if self._current_running or self._next_running():
+                    self._frame += 1
+                    self._paint_running()
+            except Exception as exc:
+                if not getattr(self, "_loop_reported", False):
+                    self._loop_reported = True
+                    try:
+                        sys.stdout.write(f"\n[!] spinner stopped: {exc}\n")
+                        sys.stdout.flush()
+                    except Exception:
+                        pass
+                return
             self._stop.wait(self.interval)
 
     def stop(self, final_msg: str = "", *, silent: bool = False, level: str = "OK") -> None:
@@ -849,28 +913,26 @@ class ToolChecklist:
         failed = sum(1 for r in self.rows if r.status == "fail")
         total = len(self.rows)
         elapsed = _fmt_elapsed(time.time() - self._t0)
-        p = _pct(done_n + skipped + failed, max(1, total))
-        bar = cyber_bar(p, width=20, color="green" if failed == 0 else "red")
         summary = f"{done_n} ok"
         if skipped:
             summary += f" · {skipped} skip"
         if failed:
             summary += f" · {failed} fail"
+        finished = done_n + skipped + failed
         with _IO:
-            if _color_on():
-                print(
-                    f"  {_BOLD}{_GREEN}✔{_R}  {bar}  {_BOLD}{total}/{total}{_R} tools  "
-                    f"{p:3.0f}%  {summary}  {_GRAY}{elapsed}{_R}"
-                )
-            else:
-                print(f"  ✔  {bar}  {total}/{total} tools  {p:3.0f}%  {summary}  {elapsed}")
+            print(
+                f"{_mark('[+]', _GREEN)}  {finished}/{total} tools  "
+                f"{summary}  {elapsed}"
+            )
             sys.stdout.flush()
-        scan_log(
-            f"{self.title}  ·  {summary}  ({elapsed})",
-            level="OK" if level == "OK" else "ERR",
-            verbose=self.verbose,
-            anim=False,
-        )
+        # The ✔ row is the normal closer. The timestamped log repeated it.
+        if self.verbose >= 2:
+            scan_log(
+                f"{self.title}  ·  {summary}  ({elapsed})",
+                level="OK" if level == "OK" else "ERR",
+                verbose=self.verbose,
+                anim=False,
+            )
         update_pipeline_state(
             module_current=total,
             module_total=total,
@@ -924,11 +986,8 @@ class LiveHUD:
     """
     Progress for a long-running step (dnsx, httpx, …).
 
-    Exactly two status lines in log/bg mode:
-      … message  running…
-      ✓ |████████| 100%  message  00:01:30
-
-    live/fg mode may also animate a single \\r spinner between them.
+    Log mode prints one [*] line, then one result line with the bar.
+    A foreground TTY rewrites one line: spinner, bar, count, percent.
     """
 
     def __init__(self, message: str = "", *, verbose: int = 1, interval: float = 0.15):
@@ -973,11 +1032,8 @@ class LiveHUD:
             self._paint()
             return self
 
-        # Non-TTY: static start line + rare heartbeats
-        if _color_on():
-            line = f"  {_YELLOW}…{_R} {_BOLD}{_WHITE}{msg}{_R}  {_GRAY}running…{_R}"
-        else:
-            line = f"  … {msg}  running…"
+        # Non-TTY: one start line. The foreground path keeps the spinner.
+        line = f"{_mark('[*]', _CYAN)} {msg}"
         with _IO:
             print(line)
             sys.stdout.flush()
@@ -986,8 +1042,10 @@ class LiveHUD:
         return self
 
     def park(self) -> None:
-        if self._bar_open:
-            _end_bar_line()
+        with _IO:
+            if self._bar_open and can_animate():
+                sys.stdout.write("\n")
+                sys.stdout.flush()
             self._bar_open = False
 
     def _status_word(self) -> str:
@@ -999,7 +1057,7 @@ class LiveHUD:
         """Keep this SHORT — must never wrap (wrap + \\r = spam rows)."""
         st = _snap()
         elapsed = _fmt_elapsed(time.time() - self._t0)
-        spin = "✓" if final else anim_block(self._frame, "thinking")
+        spin = _mark("[+]", _GREEN) if final else anim_block(self._frame, "thinking")
         msg = st.get("message") or self._message or "scanning…"
         # Trim message so bar stays on one physical line
         msg_short = msg if len(_plain(msg)) <= 36 else (_plain(msg)[:33] + "…")
@@ -1039,33 +1097,41 @@ class LiveHUD:
         if self.verbose < 0 or self._mode == "off":
             return
         if can_animate() and not final:
-            _write_bar_line(self._build_line(final=False), open_cr=True)
-            self._bar_open = True
+            _write_bar_line(self._build_line(final=False), open_cr=True, hud=self)
             return
         self.park()
         with _IO:
             print(self._build_line(final=final))
             sys.stdout.flush()
-        self._bar_open = False
+            self._bar_open = False
 
     def _loop_live(self) -> None:
         """Single-line \\r spinner for long external tools (dnsx/httpx/nuclei…)."""
         while not self._stop.is_set():
             try:
-                from run_control import CONTROL
-                if CONTROL.is_paused():
-                    self._frame += 1
-                    text = self._build_line() + (
-                        " [PAUSED]" if not _color_on() else f" {_YELLOW}[PAUSED]{_R}"
-                    )
-                    _write_bar_line(text, open_cr=True)
-                    self._bar_open = True
-                    self._stop.wait(0.3)
-                    continue
-            except Exception:
-                pass
-            self._frame += 1
-            self._paint()
+                try:
+                    from run_control import CONTROL
+                    if CONTROL.is_paused():
+                        self._frame += 1
+                        text = self._build_line() + (
+                            " [PAUSED]" if not _color_on() else f" {_YELLOW}[PAUSED]{_R}"
+                        )
+                        _write_bar_line(text, open_cr=True, hud=self)
+                        self._stop.wait(0.3)
+                        continue
+                except Exception:
+                    pass
+                self._frame += 1
+                self._paint()
+            except Exception as exc:
+                if not getattr(self, "_loop_reported", False):
+                    self._loop_reported = True
+                    try:
+                        sys.stdout.write(f"\n[!] spinner stopped: {exc}\n")
+                        sys.stdout.flush()
+                    except Exception:
+                        pass
+                return
             self._stop.wait(self.interval)
 
     def _loop_log(self) -> None:
@@ -1134,15 +1200,8 @@ class LiveHUD:
             if level == "OK":
                 p = 100.0
             bar = cyber_bar(p, width=18, color="green" if level == "OK" else "red")
-            icon = "✓" if level == "OK" else "✗"
-            if _color_on():
-                ic = _GREEN if level == "OK" else _RED
-                line = (
-                    f"  {_BOLD}{ic}{icon}{_R}  {bar}  {_BOLD}{p:3.0f}%{_R}  "
-                    f"{msg}  {_GRAY}{elapsed}{_R}"
-                )
-            else:
-                line = f"  {icon}  {bar}  {p:3.0f}%  {msg}  {elapsed}"
+            tag, color = ("[+]", _GREEN) if level == "OK" else ("[-]", _RED)
+            line = f"{_mark(tag, color)}  {bar}  {p:3.0f}%  {msg}  {elapsed}"
             with _IO:
                 print(line)
                 sys.stdout.flush()
@@ -1256,8 +1315,8 @@ def scan_activity(
 class HostProgress:
     """
     Per-host loop progress — same UX as ToolChecklist:
-      ⠋  42/150  JS fetch/secrets  scanning…  host…  00:01:04   (\\r only)
-      ✓  150/150  JS fetch/secrets  |████████| 100%  00:02:00   (one result)
+      ⠋  |███░░░░░░░|  42/150  JS fetch/secrets  scanning  host…  00:01:04
+      [+]  150/150  JS fetch/secrets  |██████████|  100%  00:02:00
     """
 
     label: str
@@ -1298,8 +1357,7 @@ class HostProgress:
         self._owns_hud = True
         self._t0 = time.time()
         self._stop.clear()
-        ts = _ts()
-        head = f"{_GRAY}[{ts}]{_R}  {_BOLD}{_CYAN}▸{_R}  {_BOLD}{self.label}{_R}  {_GRAY}({self.total} items){_R}" if _color_on() else f"[{ts}]  ▸  {self.label}  ({self.total} items)"
+        head = f"{_mark('[*]', _CYAN)} {self.label}  ({self.total} items)"
         with _IO:
             print(head)
             sys.stdout.flush()
@@ -1356,14 +1414,11 @@ class HostProgress:
         except Exception:
             paused = False
         tag = "paused" if paused else "scanning"
-        dots = think_dots(self._frame // 2)
-        if _color_on():
-            return (
-                f"  {spin}  {_GRAY}{cur}/{tot}{_R}  "
-                f"{_BOLD}{_WHITE}{self.label}{_R}  "
-                f"{_YELLOW}{tag}{dots}{_R}  {_CYAN}{item_s}{_R}  {_GRAY}{elapsed}{_R}"
-            )
-        return f"  {spin}  {cur}/{tot}  {self.label}  {tag}{dots}  {item_s}  {elapsed}"
+        bar = cyber_bar(_pct(cur, tot), width=10, color="cyan")
+        return (
+            f"  {spin}  {bar}  {cur}/{tot}  {self.label}  "
+            f"{tag:<8}  {item_s}  {elapsed}"
+        )
 
     def _paint(self) -> None:
         if not self._owns_hud or self._closed or not can_animate():
@@ -1371,13 +1426,7 @@ class HostProgress:
         with self._anim_lock:
             if self._closed:
                 return
-            text = self._running_text()
-            cols = min(100, _term_cols())
-            fitted = _truncate_plain(text, max(40, cols - 2))
-            pad = max(0, max(40, cols - 2) - len(_plain(fitted)))
-            with _IO:
-                sys.stdout.write("\r\033[2K" + fitted + (" " * pad))
-                sys.stdout.flush()
+            _rewrite_line(self._running_text())
             self._bar_open = True
 
     def _loop(self) -> None:
@@ -1407,17 +1456,10 @@ class HostProgress:
                 _clear_cr_line()
                 self._bar_open = False
             with _IO:
-                if _color_on():
-                    print(
-                        f"  {_BOLD}{_GREEN}✓{_R}  {_GRAY}{self.current}/{tot}{_R}  "
-                        f"{_BOLD}{_WHITE}{self.label}{_R}  {bar}  {_BOLD}{p:3.0f}%{_R}  "
-                        f"{_GRAY}{elapsed}{_R}{_GRAY}{extra}{_R}"
-                    )
-                else:
-                    print(
-                        f"  ✓  {self.current}/{tot}  {self.label}  {bar}  "
-                        f"{p:3.0f}%  {elapsed}{extra}"
-                    )
+                print(
+                    f"{_mark('[+]', _GREEN)}  {self.current}/{tot}  {self.label}  "
+                    f"{bar}  {p:3.0f}%  {elapsed}{extra}"
+                )
                 sys.stdout.flush()
         if self._owns_hud:
             with _HUD_LOCK:
@@ -1443,20 +1485,11 @@ class HostProgress:
 
 
 def _print_ops_banner(target: str, modules: list[str]) -> None:
-    """Plain header when a scan starts."""
+    """One status line when a scan starts."""
     tgt = target or "target"
-    amber = "\033[38;5;179m"
-    print()
-    if _color_on():
-        names = f"{_GRAY}, {_R}".join(f"{_ACCENT}{m}{_R}" for m in modules)
-        print(f"  {_BOLD}{_GREEN}{tgt}{_R}  {_GRAY}{len(modules)} modules{_R}")
-        print(f"  {names}")
-        print(f"  {amber}/pause{_R}   {amber}/resume{_R}   {amber}/stop{_R}")
-    else:
-        print(f"  {tgt}  {len(modules)} modules")
-        print("  " + ", ".join(modules))
-        print("  /pause   /resume   /stop")
-    print()
+    names = ", ".join(modules)
+    print(f"{_mark('[*]', _CYAN)} {tgt}  {len(modules)} modules: {names}")
+    print(f"{_mark('[*]', _CYAN)} Ctrl+C stops this scan")
 
 
 @dataclass
@@ -1563,13 +1596,7 @@ class PipelineProgress:
         ship, _ = FLEET_SHIPS.get(name, (name, ""))
         t = f"  {elapsed:.1f}s" if elapsed is not None else ""
         with _IO:
-            if _color_on():
-                print(
-                    f"  {_GREEN}✔{_R}  {bar}  {_BOLD}{self._idx}/{total}{_R}  "
-                    f"{_WHITE}{ship}{_R}{_GRAY}{t}{_R}"
-                )
-            else:
-                print(f"  ✔  {bar}  {self._idx}/{total}  {ship}{t}")
+            print(f"{_mark('[+]', _GREEN)}  {bar}  {self._idx}/{total}  {ship}{t}")
             sys.stdout.flush()
         if self.verbose >= 2:
             scan_log(
@@ -1605,19 +1632,11 @@ class PipelineProgress:
         mp = _pct(int(st["module_current"]), int(st["module_total"]))
         bar = cyber_bar(mp, 24, "green")
         with _IO:
-            if _color_on():
-                print(
-                    f"  {_BOLD}{_GREEN}✔{_R}  {bar}  {_BOLD}SCAN COMPLETE{_R}  "
-                    f"{len(self.modules)} modules  {_GRAY}{_fmt_elapsed(elapsed)}{_R}"
-                    + (f"  {_DIM}{_GRAY}→ {outdir}{_R}" if outdir else "")
-                )
-            else:
-                print(
-                    f"  ✔  {bar}  SCAN COMPLETE  {len(self.modules)} modules  "
-                    f"{_fmt_elapsed(elapsed)}"
-                    + (f"  → {outdir}" if outdir else "")
-                )
-            print()
+            tail = f"  → {outdir}" if outdir else ""
+            print(
+                f"{_mark('[+]', _GREEN)}  {bar}  SCAN COMPLETE  "
+                f"{len(self.modules)} modules  {_fmt_elapsed(elapsed)}{tail}"
+            )
             sys.stdout.flush()
 
 
@@ -1643,7 +1662,7 @@ def tool_progress(label: str, current: int, total: int, verbose: int = 1) -> Non
         p = _pct(current, total)
         bar = cyber_bar(p, width=22, color="blue")
         with _IO:
-            print(f"  🛠 {label}  {bar}  {current}/{total}  {p:5.1f}%")
+            print(f"{_mark('[*]', _CYAN)} {label}  {bar}  {current}/{total}  {p:5.1f}%")
             sys.stdout.flush()
 
 

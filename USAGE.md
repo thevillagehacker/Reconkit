@@ -13,8 +13,7 @@ The target must already be in `~/.reconkit/scope.txt`. Output is
 `~/.reconkit/output/<target>/`. A normal scan does not call a model.
 
 `python recon.py help <command>` prints the longer help for that command.
-Inside the shell, `/<command> -h` does the same. The older form
-`python recon.py run --target example.com` still works.
+The older form `python recon.py run --target example.com` still works.
 
 Other docs: [AGENTS.md](AGENTS.md), [HUNTER.md](HUNTER.md),
 [config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md),
@@ -50,34 +49,29 @@ Other docs: [AGENTS.md](AGENTS.md), [HUNTER.md](HUNTER.md),
 | HAR import | `python recon.py har --target example.com --file capture.har` |
 | Evidence zip | `python recon.py evidence --target example.com` |
 | Target wordlist | `python recon.py wordlist-target --target example.com` |
-| Shell | `python recon.py shell` |
 | Scan view | `python recon.py view example.com` |
-| Quick scan | `/quick example.com` |
-| Full scan | `/full example.com` |
-| Module picker | `/scan example.com` |
-| Notable scores | `/notable example.com` |
-| Diff | `/diff example.com` |
-| Report draft | `/report example.com` |
-| Attack graph | `/graph show example.com` |
-| Program weights | `/program set example-web` |
-| Inbox | `/inbox example.com` |
-| Playbook | `/playbook run js-deep example.com` |
-| Background job | `/jobs` |
-| Pause / stop | `/pause`  /  `/stop` |
-| Rate | `/rate stealth` |
-| Doctor | `/doctor example.com` |
-| Tips search | `/tips reflected xss` |
-| Critic | `/critic example.com` |
-| Confidence dump | `/eval example.com` |
+| Quick playbook | `python recon.py playbook run quick --target example.com` |
+| Full playbook | `python recon.py playbook run full --target example.com` |
+| Playbook list | `python recon.py playbook list` |
+| Notable scores | `python recon.py notable --target example.com` |
+| Diff | `python recon.py diff --target example.com` |
+| Report draft | `python recon.py report --target example.com` |
+| Attack graph | `python recon.py graph show --target example.com` |
+| Program weights | `python recon.py program set example-web` |
+| Inbox | `python recon.py inbox --target example.com` |
+| Rate | `python recon.py rate stealth` |
+| Tool caps | `python recon.py set RECON_AMASS_TIMEOUT 900` |
+| Doctor | `python recon.py doctor --target example.com` |
+| Tips search | `python recon.py tips reflected xss` |
+| Critic | `python recon.py critic --target example.com` |
+| Confidence dump | `python recon.py eval --target example.com` |
 | Agent scan | `python recon.py agents example.com` |
 | List agents | `python recon.py agents` |
 | LLM check | `python recon.py agents check-llm` |
 | LLM providers | `python recon.py agents providers` |
 | LLM config | `python recon.py agents config set --provider xai --model grok-2-latest` |
 
-Shell commands that have no one-line CLI (`/notable`, `/diff`, `/graph`,
-`/report`, `/playbook`, `/jobs`, `/rate`, `/doctor`, `/tips`, `/critic`,
-`/eval`, `/inbox`, `/program`) run after `python recon.py shell`.
+A scan is the foreground process. Ctrl+C stops it. There is no interactive shell.
 
 ---
 
@@ -103,27 +97,24 @@ python recon.py -v 3 example.com --modules subdomains
 | `-v 0-3` | 0 quiet, 1 normal, 2 debug, 3 live tool output. `--debug` is `-v 2`. |
 
 `--review` uses the provider in `config/agent_config.json`. A missing key is
-recorded in the note and the scan continues. `/stop` skips `reviews/summary.txt`.
+recorded in the note and the scan continues. Ctrl+C skips `reviews/summary.txt`.
 
-Each tool writes `~/.reconkit/output/<target>/tools/<stage>/<tool>.txt` when it
-finishes. The shell shows one progress line per tool.
+Each result is written once. Per-source subdomain and crawl lists go to
+`~/.reconkit/output/<target>/tools/<stage>/<tool>.txt` as that tool finishes,
+and the merge file (`subdomains.txt`, `urls.txt`) is rebuilt from those lists.
+A stage with one result writes that file at the output root (`alive.txt`,
+`dns_records.txt`, `resolved.txt`, `tls_recon.json`, `wellknown.txt`) and keeps
+the exit code in `tools/<stage>/<tool>.txt.rc`. On a terminal, one running
+line stays in place. Each finished tool then prints one result row.
 
-```text
-python recon.py shell
-> /run example.com
-> /jobs
-> /pause
-> /resume
-> /stop
-> /run example.com --fg
-> /quick example.com
-> /full example.com
-> /scan example.com
+```bash
+python recon.py example.com
+python recon.py playbook run quick --target example.com
+python recon.py playbook run full --target example.com
 ```
 
-`/run` is a background job. `/quick` is subdomains, dns, and httpprobe.
-`/full` is every module. `/scan` is the module picker. `--fg` blocks the shell
-until the scan finishes.
+`quick` is subdomains, dns, and httpprobe. `full` is every module.
+`python recon.py modules` lists the stages.
 
 ---
 
@@ -198,39 +189,35 @@ Known key names: `PDCP_API_KEY`, `GITHUB_TOKEN`, `SHODAN_API_KEY`,
 `CENSYS_API_ID`, `CENSYS_API_SECRET`, `SECURITYTRAILS_API_KEY`,
 `VIRUSTOTAL_API_KEY`. Values live in `~/.reconkit/secrets.env`.
 
-```text
-> /checkenv
-> /setup
-> /verify
-> /wordlists
-> /scope add example.com
-> /scope list
-> /scope check example.com
-> /keys list
+```bash
+python recon.py checkenv
+python recon.py setup
+python recon.py verify
+python recon.py wordlists
+python recon.py scope add example.com
+python recon.py scope list
+python recon.py scope check example.com
+python recon.py keys list
 ```
 
 ---
 
-## 5. Shell session
+## 5. Workflow commands
 
 ```bash
-python recon.py shell
-python recon.py shell example.com
+python recon.py playbook list
+python recon.py playbook run js-deep --target example.com
+python recon.py rate show
+python recon.py rate stealth
+python recon.py set
+python recon.py set RECON_AMASS_TIMEOUT 900
+python recon.py doctor --target example.com
+python recon.py -v 2 example.com
 ```
 
-| Command | Example |
-|---------|---------|
-| `/target example.com` | Active target for later commands |
-| `/verbose 2` | 0 quiet, 1 normal, 2 debug, 3 live tools |
-| `/status` | Target, verbose level, paths, LLM config |
-| `/outdir example.com` | List that target's output folder |
-| `/banner` | Redraw the banner |
-| `/clear` | Clear the terminal |
-| `/commands` | Every slash name |
-| `/help run` | Same as `/run -h` |
-| `/exit` | Leave the shell |
-
-Autocomplete needs `prompt_toolkit`. Type `/co` to see matches.
+`-v` is 0 quiet, 1 normal, 2 debug, 3 live tool output. `rate` and `set`
+are stored in `~/.reconkit/config.json` and apply on the next scan. Output
+for a target is `~/.reconkit/output/<target>/`.
 
 ---
 
@@ -241,44 +228,29 @@ Reindex after a scan so scores, diffs, the graph, and prove see the new files.
 ```bash
 python recon.py findings reindex
 python recon.py findings example.com
-```
-
-```text
-> /findings reindex
-> /findings example.com
-> /findings example.com --min-confidence C1
-> /findings example.com --all
-> /notable example.com
-> /notable example.com --limit 40
-> /top example.com
-> /diff example.com
-> /report example.com
-> /report example.com --all
-> /inbox example.com
-> /eval example.com
-> /graph summary
-> /graph show example.com
-> /graph show example.com --min-score 40
+python recon.py notable --target example.com --limit 40
+python recon.py diff --target example.com
+python recon.py report --target example.com
+python recon.py report --target example.com --all
+python recon.py inbox --target example.com
+python recon.py eval --target example.com
+python recon.py graph summary --target example.com
+python recon.py graph show --target example.com --min-score 40
+python recon.py program list
+python recon.py program show
+python recon.py program set example-web
 ```
 
 | Command | Result |
 |---------|--------|
-| `/findings reindex` | Rebuild `~/.reconkit/index/findings_index.json` and the SQLite index |
-| `/findings <target>` | Summary for that target. Default floor is C1. `--all` drops the floor. |
-| `/notable` | Rows with score at least 40 (35 when program `example-web` is set) |
-| `/diff` | New, gone, and score changes since the previous reindex. Needs two reindexes. |
-| `/report` | `report_draft.md` in the target folder. Notable rows unless `--all`. |
-| `/inbox` | C2 proofs first, then high-score C1 rows, each with a `/prove` technique |
-| `/eval` | Local C0-C4 labels. `--llm` asks the configured model about borderline rows. |
-| `/graph show` | Target, host, finding, and proof links. `--min-score 40` hides low scores. |
-
-```text
-> /program list
-> /program show
-> /program set example-web
-> /findings reindex
-> /notable example.com
-```
+| `findings reindex` | Rebuild `~/.reconkit/index/findings_index.json` and the SQLite index |
+| `findings <target>` | Count, modules, severity, and the first high or medium rows |
+| `notable` | Rows with score at least 40 (35 when program `example-web` is set) |
+| `diff` | New, gone, and score changes since the previous reindex. Needs two reindexes. |
+| `report` | `report_draft.md` in the target folder. Notable rows unless `--all`. |
+| `inbox` | C2 proofs first, then high-score C1 rows, each with a prove technique |
+| `eval` | Local C0-C4 labels. `--llm` asks the configured model about borderline rows. |
+| `graph show` | Target, host, finding, and proof links. `--min-score 40` hides low scores. |
 
 Profiles are `config/programs/*.json`. `RECON_PROGRAM=example-web` is the same
 switch. Set the profile, then reindex, or the weights are not in the scores.
@@ -287,20 +259,15 @@ switch. Set the profile, then reindex, or the weights are not in the scores.
 python recon.py evidence --target example.com
 python recon.py evidence --target example.com --id <finding-id>
 python recon.py wordlist-target --target example.com
+python recon.py doctor --target example.com
+python recon.py tips reflected xss
+python recon.py critic --target example.com
 ```
 
-```text
-> /evidence example.com
-> /wordlist-target example.com
-> /doctor example.com
-> /tips reflected xss
-> /critic example.com
-```
-
-`/evidence` writes a zip of recon output and proofs, skipping other zips and
-files over 4 MB. `/wordlist-target` builds a wordlist from crawl paths and
-parameter names. `/doctor` checks tools, the debug log, and that target folder.
-`/tips` searches `skills/` and `~/.reconkit/notes`. `/critic` reviews
+`evidence` writes a zip of recon output and proofs, skipping other zips and
+files over 4 MB. `wordlist-target` builds a wordlist from crawl paths and
+parameter names. `doctor` checks tools, the debug log, and that target folder.
+`tips` searches `skills/` and `~/.reconkit/notes`. `critic` reviews
 `agent_report.md` or `report_draft.md` with the configured model.
 
 ---
@@ -319,16 +286,8 @@ python recon.py prove example.com xss_reflect
 python recon.py prove example.com --dry-run
 python recon.py prove list example.com
 python recon.py prove show example.com <proof-id>
-```
-
-```text
-> /prove techniques
-> /prove policy
-> /prove queue example.com
-> /prove run example.com --dry-run
-> /prove run example.com --technique xss_reflect --limit 10
-> /prove list example.com
-> /prove show <id>
+python recon.py prove run --target example.com --dry-run
+python recon.py prove run --target example.com --technique xss_reflect --limit 10
 ```
 
 | Technique | Check |
@@ -368,33 +327,29 @@ python recon.py session clear
 python recon.py har --target example.com --file capture.har
 ```
 
-```text
-> /session show
-> /session set --cookie "sid=..."
-> /session clear
-> /har import capture.har example.com
-> /rate show
-> /rate stealth
-> /rate normal
-> /rate aggressive
+```bash
+python recon.py rate show
+python recon.py rate stealth
+python recon.py set
+python recon.py set RECON_AMASS_TIMEOUT 900
 ```
 
 Cookies stay in `~/.reconkit/session.json`. HAR import keeps in-scope URLs and
-can copy a Cookie into the session. `/rate` stores stealth, normal, or
+can copy a Cookie into the session. `rate` stores stealth, normal, or
 aggressive in the reconkit config. Stealth lowers concurrency and adds delay.
 Aggressive is faster and still has to stay inside the program rules.
+`set` stores a tool time cap. The new value applies the next time that tool
+starts, including the next run. Amass accepts 30 to 900 seconds.
 
 ---
 
-## 9. Playbooks and jobs
+## 9. Playbooks
 
-```text
-> /playbook list
-> /playbook run quick example.com
-> /playbook run js-deep example.com
-> /playbook run prove-prep example.com
-> /jobs
-> /jobs status <id>
+```bash
+python recon.py playbook list
+python recon.py playbook run quick --target example.com
+python recon.py playbook run js-deep --target example.com
+python recon.py playbook run prove-prep --target example.com
 ```
 
 | Playbook | Modules |
@@ -406,14 +361,13 @@ Aggressive is faster and still has to stay inside the program rules.
 | `api-surface` | httpprobe, crawl, js, jsintel, params, apis, graphql, cors, nuclei |
 | `content-light` | httpprobe, wellknown, content, bypass403 |
 | `ports-hint` | subdomains, dns, ports, httpprobe, tls |
-| `auth-surface` | httpprobe, crawl, js, jsintel, apis, bypass403. Set `/session` first. |
+| `auth-surface` | httpprobe, crawl, js, jsintel, apis, bypass403. Set the session first. |
 | `vuln-pass` | xss, sqli, ssrf_ssti, redirect, cors, graphql, nuclei, cloud |
 | `prove-prep` | httpprobe, crawl, xss, sqli, ssrf_ssti, redirect, cors, graphql, nuclei, cloud |
 | `hunter` | enum, permute, ports, crawl, JS intel, APIs, 403, takeover extras |
 | `full` | every module |
 
-`/run` is a background job. `/pause` holds it, `/resume` continues, `/stop`
-kills the tool process.
+A playbook run is a foreground scan of that module list. Ctrl+C stops it.
 
 ---
 
@@ -433,17 +387,7 @@ python recon.py agents example.com --approve
 python recon.py agents config show
 python recon.py agents config set --provider xai --model grok-2-latest
 python recon.py agents config set --provider ollama --base-url http://192.168.1.4:11434 --model qwen3:8b
-```
-
-```text
-> /agents
-> /check-llm
-> /config show
-> /config set --provider xai --model grok-2-latest
-> /agent example.com --max-steps 8
-> /agent example.com --modules xss --dry-run
-> /agent example.com --approve
-> /critic example.com
+python recon.py critic --target example.com
 ```
 
 | Piece | Role |
@@ -508,15 +452,15 @@ the phase. `RECON_AGENT_HUNT_PHASE=off` skips the pack.
 python recon.py agents
 ```
 
-Confidence used by the skills and by `/eval`:
+Confidence used by the skills and by `python recon.py eval`:
 
 | Tier | Meaning | Next step |
 |------|---------|-----------|
 | C0 | Noise | Drop |
-| C1 | Scanner candidate | `/prove` or a manual check |
+| C1 | Scanner candidate | `python recon.py prove` or a manual check |
 | C2 | Canary confirmed | Proof is in `proofs/` |
 | C3 | Impact shown by a person | Notes under the program rules |
-| C4 | Ready to submit | `/critic` and `/report` |
+| C4 | Ready to submit | `python recon.py critic` and `python recon.py report` |
 
 ---
 
@@ -524,7 +468,7 @@ Confidence used by the skills and by `/eval`:
 
 ```text
 recon.py
-src/                 reconkit, shell, prove, agents, findings, graph, hunter, programs
+src/                 reconkit, prove, agents, findings, graph, hunter, programs
 skills/              SKILL.md packs and bug-bounty-hunting-prompts/
 config/              agent_config.json, exploit_policy.json, programs/
 ```
@@ -543,13 +487,16 @@ config/              agent_config.json, exploit_policy.json, programs/
   notes/
   output/<target>/
     subdomains.txt
+    resolved.txt
+    dns_records.txt
     alive.txt
     urls.txt
-    tools/<stage>/<tool>.txt
-    tools/<stage>/<tool>.txt.rc
-    httpprobe.json
+    tls_recon.json
+    wellknown.txt
     diff_assets.json
-    diff_assets.md
+    run_meta.json
+    tools/<stage>/<tool>.txt       per-source lists (subdomains, crawl)
+    tools/<stage>/<tool>.txt.rc     exit code for --resume
     reviews/<phase>.txt
     proofs/
     report_draft.md
@@ -560,11 +507,12 @@ config/              agent_config.json, exploit_policy.json, programs/
 `subdomains.txt.prev`, `resolved.txt.prev`, `alive.txt.prev`, and
 `urls.txt.prev` are the previous copies used to write `diff_assets.json`.
 The first scan writes an empty diff. Alive hosts are compared by hostname.
-`/diff` compares findings after two reindexes.
+`python recon.py diff` compares findings after two reindexes.
 
 `tools/<stage>/<tool>.txt.rc` is that tool's exit code. `124` means
 `--resume` runs it again. A missing marker counts as finished. A missing
-httpx or crawler leaves `alive.txt` and `urls.txt` in place.
+httpx or crawler leaves `alive.txt` and `urls.txt` in place. `alive_urls.txt`
+is written when nuclei or screenshots need a URL-only list.
 
 ---
 
@@ -586,17 +534,16 @@ httpx or crawler leaves `alive.txt` and `urls.txt` in place.
 | few subdomains | `python recon.py keys list`, then re-run `subdomains` |
 | tool missing | `python recon.py setup`, then `python recon.py verify` |
 | empty stage | `python recon.py -v 2 example.com` and read `~/.reconkit/logs/debug.log` |
-| `/findings` looks old | `python recon.py findings reindex` |
-| `/diff` wants two reindexes | Reindex once after each scan |
-| `/notable` is empty | Reindex. Rows under the score floor are hidden. |
-| `/prove queue` is empty | Reindex, then `/prove queue example.com --all` |
+| findings look old | `python recon.py findings reindex` |
+| diff wants two reindexes | Reindex once after each scan |
+| notable is empty | Reindex. Rows under the score floor are hidden. |
+| prove queue is empty | Reindex, then `python recon.py prove queue --target example.com --all` |
 | prove says out of scope | `scope add`, then confirm |
-| `/critic` fails | `/check-llm`, and an `agent_report.md` or `report_draft.md` |
-| graph is empty | Reindex, then `/graph show example.com --min-score 40` |
-| program weights missing | `/program set example-web`, then reindex |
+| critic fails | `python recon.py agents check-llm`, and an `agent_report.md` or `report_draft.md` |
+| graph is empty | Reindex, then `python recon.py graph show --target example.com --min-score 40` |
+| program weights missing | `python recon.py program set example-web`, then reindex |
 | check-llm connection refused | From a VM, set `--base-url` to the Windows host IP, not the VM IP |
 | cloud auth error | Export the provider key, then `python recon.py agents check-llm` |
-| shell has no matches | `pip install prompt_toolkit` and use a real terminal |
 | no color | `pip install colorama` |
 
 ---
@@ -612,12 +559,8 @@ python recon.py example.com --modules subdomains,dns,httpprobe,crawl,nuclei
 python recon.py findings reindex
 python recon.py findings example.com
 python recon.py prove example.com --dry-run
-python recon.py shell
-```
-
-```text
-> /notable example.com
-> /inbox example.com
-> /graph show example.com
-> /report example.com
+python recon.py notable --target example.com
+python recon.py inbox --target example.com
+python recon.py graph show --target example.com
+python recon.py report --target example.com
 ```

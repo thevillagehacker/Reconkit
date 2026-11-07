@@ -284,7 +284,7 @@ def finish_run(*, ok: bool = True, outdir: str = "", message: str = "") -> dict[
     })
 
 
-def mark_stopped(message: str = "stopped by operator (/stop)") -> dict[str, Any]:
+def mark_stopped(message: str = "stopped by operator") -> dict[str, Any]:
     """Stop without wiping modules/target (dashboard still shows last run)."""
     return publish({
         "active": False,
@@ -355,7 +355,7 @@ def read_live() -> dict[str, Any]:
             "current_tool": "",
             "host_current": 0,
             "host_total": 0,
-            "message": "no live scan file — start /run or /agent",
+            "message": "no live scan file — start python recon.py <target>",
             "updated_at": 0,
             "stale": True,
             "_path": str(live_path()),

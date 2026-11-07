@@ -553,7 +553,7 @@ class AnalystAgent:
             "Inventory repeats the counts above.\n"
             "A lead needs a host or URL copied from evidence or PRE-EVAL. Tag C0-C4. "
             "C2 needs a canary or proof already in that text. No C3.\n"
-            "Next names one id from techniques_named, else one /prove technique id from PRE-EVAL, or none. "
+            "Next names one id from techniques_named, else one prove technique id from PRE-EVAL, or none. "
             "Do not claim it ran.\n"
             "Gaps names empty files that block a check."
         )
