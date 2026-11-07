@@ -238,6 +238,34 @@ def test_spinner_glyph_is_colored_when_color_is_on() -> None:
     assert ui.anim_block(0) == "⠋"
 
 
+def test_long_tool_list_keeps_spinner_color() -> None:
+    old_no = os.environ.pop("NO_COLOR", None)
+    old_force = os.environ.get("FORCE_COLOR")
+    os.environ["FORCE_COLOR"] = "1"
+    try:
+        cl = ui.ToolChecklist(
+            [
+                "subfinder", "assetfinder", "amass", "wayback",
+                "crt.sh", "otx", "chaos", "hackertarget",
+            ],
+            verbose=1,
+        )
+        for row in cl.rows:
+            row.status = "running"
+        cl._current_running = "subfinder"
+        fitted = ui._truncate_plain(cl._running_text(), 78)
+        assert "\033[38;2;" in fitted
+        assert any(ch in fitted for ch in "⠋⠙⠹⠼⠴⠦⠧⠇⠏")
+        plain = re.sub(r"\033\[[0-9;]*[A-Za-z]", "", fitted)
+        assert len(plain) <= 78
+    finally:
+        os.environ["NO_COLOR"] = old_no if old_no is not None else "1"
+        if old_force is None:
+            os.environ.pop("FORCE_COLOR", None)
+        else:
+            os.environ["FORCE_COLOR"] = old_force
+
+
 def test_phase_end_leaves_one_completion_bar() -> None:
     pipe = ui.PipelineProgress(["httpprobe"], verbose=1, target="globe.gov")
     pipe._idx = 1
@@ -462,6 +490,7 @@ def main() -> None:
         test_summary_is_one_line()
         test_warning_takes_its_own_line()
         test_background_tty_prints_finish_rows_only()
+        test_long_tool_list_keeps_spinner_color()
         test_phase_end_leaves_one_completion_bar()
         test_probe_progress_records_each_host()
         test_http_probe_stream_splits_partial_lines()

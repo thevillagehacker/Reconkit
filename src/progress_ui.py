@@ -477,14 +477,38 @@ def scan_log(
 # ---------------------------------------------------------------------------
 
 def _truncate_plain(text: str, max_plain: int) -> str:
-    """Truncate by visible length (strip ANSI) so the line never wraps."""
+    """Cut the row to max_plain columns and keep its color codes.
+
+    A long tool list used to drop every color code so the line would fit.
+    The spinner then stayed plain until enough tools finished for the
+    names to fit again.
+    """
     if max_plain < 8:
         max_plain = 8
-    plain = _plain(text)
-    if len(plain) <= max_plain:
+    if len(_plain(text)) <= max_plain:
         return text
-    # Drop ANSI and hard-cut — safer than partial SGR sequences
-    return plain[: max_plain - 1] + "…"
+    out: list[str] = []
+    visible = 0
+    limit = max_plain - 1
+    i = 0
+    n = len(text)
+    while i < n and visible < limit:
+        if text[i] == "\033" and i + 1 < n and text[i + 1] == "[":
+            j = i + 2
+            while j < n and text[j] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+                j += 1
+            if j < n:
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        out.append(text[i])
+        visible += 1
+        i += 1
+    out.append("…")
+    if "\033[" in text:
+        out.append("\033[0m")
+    return "".join(out)
 
 
 def _live_width() -> int:
