@@ -290,9 +290,16 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
-# Bright cyan, green, yellow, magenta. One SGR each so the glyph stays
-# colored on Windows Terminal (a second code can drop the first).
-_SPIN_COLORS = ("\033[1;96m", "\033[1;92m", "\033[1;93m", "\033[1;95m")
+# RGB cyan, green, yellow, magenta. Bold plus a bright ANSI color
+# (1;96 and friends) is stored correctly but Windows Terminal paints
+# that glyph white until a tab switch redraws the row.
+_SPIN_COLORS = (
+    "\033[38;2;0;210;255m",
+    "\033[38;2;80;250;123m",
+    "\033[38;2;255;214;70m",
+    "\033[38;2;255;121;198m",
+)
+_SGR_SPLIT = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 
 
 def anim_block(frame: int, style: str = "thinking") -> str:
@@ -302,7 +309,7 @@ def anim_block(frame: int, style: str = "thinking") -> str:
         ch = _ANIM_BRAILLE[frame % len(_ANIM_BRAILLE)]
     if not _color_on():
         return ch
-    return f"{_SPIN_COLORS[frame % len(_SPIN_COLORS)]}{ch}{_R}"
+    return f"{_SPIN_COLORS[frame % len(_SPIN_COLORS)]}{ch}\033[39m"
 
 
 def think_dots(frame: int) -> str:
@@ -493,15 +500,29 @@ def _live_width() -> int:
 def _rewrite_line(text: str) -> None:
     """Replace the current row. No newline, so the row stays in place.
 
-    Draw the text, then erase to the end of the line. Erasing the whole
-    line before the text left the row blank on Windows Terminal: the erase
-    was applied and the text in the same write never showed. Padding the
-    row out to the terminal width caused the same miss when the pad wrapped.
+    Flush each color code before the characters that follow it. Windows
+    Terminal paints a glyph white when its color code shares the same
+    write on a carriage-return row, and the color appears only after a
+    tab switch redraws the buffer. Erase the tail after the text.
     """
     _ensure_vt()
     fitted = _truncate_plain(text, _live_width())
     with _IO:
-        sys.stdout.write("\r" + fitted + "\033[K")
+        sys.stdout.write("\r")
+        sys.stdout.flush()
+        pos = 0
+        for match in _SGR_SPLIT.finditer(fitted):
+            if match.start() > pos:
+                sys.stdout.write(fitted[pos:match.start()])
+                sys.stdout.flush()
+            sys.stdout.write(match.group())
+            sys.stdout.flush()
+            pos = match.end()
+        tail = fitted[pos:]
+        if tail:
+            sys.stdout.write(tail)
+            sys.stdout.flush()
+        sys.stdout.write("\033[K")
         sys.stdout.flush()
 
 
@@ -963,6 +984,149 @@ def suppress_checklist(on: bool) -> None:
     one's spinner. The work still runs; the phase banner stays on the main HUD.
     """
     _CHECKLIST_TLS.quiet = bool(on)
+
+
+class ProbeProgress:
+    """One live row while a host list is probed, then one line per outcome.
+
+    httpx checks many hosts at once, so the live row counts answers.
+    Each host that answers gets a [+] line. Each host with no answer gets
+    a [-] line when the probe finishes. Those lines do not repeat the bar.
+    """
+
+    def __init__(self, total: int, *, interval: float = 0.12, verbose: int = 1):
+        self.total = max(0, int(total))
+        self.interval = interval
+        self.verbose = verbose
+        self._hits = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._frame = 0
+        self._t0 = time.time()
+        self._closed = False
+        self._bar_open = False
+        self._started = False
+        self._anim_lock = threading.Lock()
+
+    def start(self) -> "ProbeProgress":
+        global _ACTIVE_HUD
+        if self.verbose < 1 or self._closed:
+            return self
+        _ensure_vt()
+        _stop_active_hud(silent=True)
+        with _HUD_LOCK:
+            _ACTIVE_HUD = self
+        update_pipeline_state(
+            message="scanning",
+            host_label="Hosts",
+            host_current=0,
+            host_total=self.total,
+        )
+        self._started = True
+        self._stop.clear()
+        self._t0 = time.time()
+        self._frame = 0
+        if can_animate():
+            self._thread = threading.Thread(
+                target=self._loop, name="probe-progress", daemon=True
+            )
+            self._thread.start()
+        return self
+
+    def hit(self, name: str, detail: str = "") -> None:
+        self._row("[+]", _GREEN, name, detail, advance=True)
+
+    def miss(self, name: str, detail: str = "no response") -> None:
+        self._row("[-]", _RED, name, detail, advance=False)
+
+    def _row(self, tag: str, color: str, name: str, detail: str, *, advance: bool) -> None:
+        if self.verbose < 1 or self._closed:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        with self._anim_lock:
+            idx = ""
+            if advance:
+                self._hits += 1
+                if self.total > 0:
+                    width = len(f"{self.total}/{self.total}")
+                    idx = f"{self._hits}/{self.total}".rjust(width)
+            update_pipeline_state(
+                host_current=min(self._hits, self.total),
+                host_total=self.total,
+                last_item=name,
+            )
+            if self._bar_open:
+                _clear_cr_line()
+                self._bar_open = False
+            extra = f"  {detail}" if detail else ""
+            gap = f"  {idx}  " if idx else "  "
+            line = f"{_mark(tag, color)}{gap}{name}{extra}"
+            with _IO:
+                print(line)
+                sys.stdout.flush()
+            if can_animate():
+                self._paint_unlocked()
+
+    def _text(self) -> str:
+        total = self.total
+        hits = self._hits
+        pct = _pct(min(hits, total), total) if total else 0.0
+        bar = cyber_bar(pct, width=10, color="cyan")
+        counts = f"{hits}/{total}"
+        elapsed = _fmt_elapsed(time.time() - self._t0)
+        spin = anim_block(self._frame)
+        mark = _mark("[*]", _CYAN)
+        if _color_on():
+            return (
+                f"{mark} {spin} {bar} {_GRAY}{counts}{_R} "
+                f"{pct:3.0f}%  scanning  {_GRAY}{elapsed}{_R}"
+            )
+        return f"{mark} {spin} {bar} {counts} {pct:3.0f}%  scanning  {elapsed}"
+
+    def _paint_unlocked(self) -> None:
+        if self._closed or not can_animate():
+            return
+        _rewrite_line(self._text())
+        self._bar_open = True
+
+    def _paint(self) -> None:
+        with self._anim_lock:
+            self._paint_unlocked()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._frame += 1
+                self._paint()
+            except Exception as exc:
+                if not getattr(self, "_loop_reported", False):
+                    self._loop_reported = True
+                    try:
+                        sys.stdout.write(f"\n[!] spinner stopped: {exc}\n")
+                        sys.stdout.flush()
+                    except Exception:
+                        pass
+                return
+            self._stop.wait(self.interval)
+
+    def stop(self) -> None:
+        global _ACTIVE_HUD
+        if self._closed:
+            return
+        self._closed = True
+        self._stop.set()
+        with self._anim_lock:
+            if self._bar_open:
+                _clear_cr_line()
+                self._bar_open = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.5)
+        self._thread = None
+        with _HUD_LOCK:
+            if _ACTIVE_HUD is self:
+                _ACTIVE_HUD = None
 
 
 def tool_checklist(
@@ -1590,15 +1754,9 @@ class PipelineProgress:
         except Exception:
             pass
         _stop_active_hud(silent=True)
-        # One compact phase-complete line (no second INF log at normal verbosity)
-        p = _pct(self._idx, total)
-        bar = cyber_bar(p, width=20, color="green")
-        ship, _ = FLEET_SHIPS.get(name, (name, ""))
-        t = f"  {elapsed:.1f}s" if elapsed is not None else ""
-        with _IO:
-            print(f"{_mark('[+]', _GREEN)}  {bar}  {self._idx}/{total}  {ship}{t}")
-            sys.stdout.flush()
+        # The phase row is the start line. SCAN COMPLETE is the one bar.
         if self.verbose >= 2:
+            t = f"  {elapsed:.1f}s" if elapsed is not None else ""
             scan_log(
                 f"{phase_emoji('done')} phase complete · {name}{t}  ({self._idx}/{total})",
                 level="OK",

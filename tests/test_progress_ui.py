@@ -238,6 +238,58 @@ def test_spinner_glyph_is_colored_when_color_is_on() -> None:
     assert ui.anim_block(0) == "⠋"
 
 
+def test_phase_end_leaves_one_completion_bar() -> None:
+    pipe = ui.PipelineProgress(["httpprobe"], verbose=1, target="globe.gov")
+    pipe._idx = 1
+    ended = _capture(lambda: pipe.end_module("httpprobe", 43.0))
+    assert "█" not in ended
+    assert "HTTP probe" not in ended
+    done = _capture(lambda: pipe.finish("/tmp/globe.gov"))
+    assert "SCAN COMPLETE" in done
+    assert "█" in done
+
+
+def test_probe_progress_records_each_host() -> None:
+    probe = ui.ProbeProgress(2, interval=10, verbose=1)
+    text = _capture(
+        lambda: (
+            probe.hit("https://www.globe.gov", "200"),
+            probe.miss("old.globe.gov", "no response"),
+        )
+    )
+    shown = [ln for ln in _visible(text) if "scanning" not in ln]
+    hit = next(ln for ln in shown if "www.globe.gov" in ln)
+    miss = next(ln for ln in shown if "old.globe.gov" in ln)
+    assert hit.startswith("[+]") and "1/2" in hit and "200" in hit
+    assert "█" not in hit
+    assert miss.startswith("[-]") and "no response" in miss
+    assert "1/2" not in miss
+
+
+def test_http_probe_stream_splits_partial_lines() -> None:
+    import reconkit as rk
+
+    lines, rest = rk.split_stream_lines("", "https://a.example [200]\nhttps://b")
+    assert lines == ["https://a.example [200]"]
+    assert rest == "https://b"
+    lines, rest = rk.split_stream_lines(rest, ".example [301]\n")
+    assert lines == ["https://b.example [301]"]
+    assert rest == ""
+    feed = rk._HttpProbeFeed(None, ["a.example", "old.example"])
+    feed.write(b"https://a.example [200] [Home]\nhttps://a.example/path")
+    feed.flush_tail()
+    assert feed.responded == {"a.example"}
+    missed: list[str] = []
+
+    class _Rec:
+        def miss(self, name: str, detail: str = "") -> None:
+            missed.append(f"{name} {detail}")
+
+    feed.progress = _Rec()
+    feed.misses()
+    assert missed == ["old.example no response"]
+
+
 def test_foreground_scan_drops_a_stale_background_flag() -> None:
     old_bg = os.environ.get("RECONKIT_BG")
     old_forced = os.environ.get("RECONKIT_PROGRESS")
@@ -410,6 +462,9 @@ def main() -> None:
         test_summary_is_one_line()
         test_warning_takes_its_own_line()
         test_background_tty_prints_finish_rows_only()
+        test_phase_end_leaves_one_completion_bar()
+        test_probe_progress_records_each_host()
+        test_http_probe_stream_splits_partial_lines()
         test_spinner_glyph_is_colored_when_color_is_on()
         test_spinner_stays_while_another_tool_runs()
         test_foreground_scan_drops_a_stale_background_flag()

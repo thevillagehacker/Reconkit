@@ -1810,6 +1810,16 @@ def resume_legacy_merge(outdir: Path, stage: str, *merges: Path) -> bool:
     return False
 
 
+def split_stream_lines(pending: str, chunk: str) -> tuple[list[str], str]:
+    """Split a tool stream into complete lines. Keep a partial tail."""
+    text = pending + chunk.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in text:
+        return [], text
+    parts = text.split("\n")
+    lines = [part.strip() for part in parts[:-1] if part.strip()]
+    return lines, parts[-1]
+
+
 def pipe_into(
     commands: list[list[str]],
     input_data: bytes,
@@ -1819,6 +1829,7 @@ def pipe_into(
     tool: str,
     cap_key: str,
     suffix: str = ".txt",
+    on_stdout=None,
 ) -> bytes:
     """Run a pipeline with a wall-clock cap and a live tools/ file.
 
@@ -1832,10 +1843,20 @@ def pipe_into(
     """
     cap = tool_cap(cap_key)
     live = LiveToolFile(outdir, stage, tool, suffix=suffix)
+
+    def _write(chunk: bytes) -> None:
+        live.write(chunk)
+        if on_stdout is None:
+            return
+        try:
+            on_stdout(chunk)
+        except Exception:
+            pass
+
     data = b""
     rc = 124
     try:
-        data = pipeline(commands, input_data=input_data, timeout=cap, on_stdout=live.write)
+        data = pipeline(commands, input_data=input_data, timeout=cap, on_stdout=_write)
         rc = int(_LAST_PIPE_RC)
     finally:
         live.close()
@@ -3651,6 +3672,53 @@ def stage_dns(target: str, outdir: Path, subs_file: Path) -> None:
        f"{outdir / 'cname_takeover_candidates.txt'} (verify manually before reporting)")
 
 
+class _HttpProbeFeed:
+    """Turn httpx stdout into one outcome line per host."""
+
+    def __init__(self, progress, hosts: list[str]):
+        self.progress = progress
+        self.hosts = hosts
+        self.pending = ""
+        self.responded: set[str] = set()
+
+    def write(self, chunk: bytes) -> None:
+        text = strip_ansi(chunk.decode("utf-8", errors="replace"))
+        lines, self.pending = split_stream_lines(self.pending, text)
+        for line in lines:
+            self._one(line)
+
+    def flush_tail(self) -> None:
+        if self.pending.strip():
+            self._one(self.pending)
+            self.pending = ""
+
+    def _one(self, line: str) -> None:
+        parsed = parse_httpx_line(line)
+        host = str(parsed.get("host") or "")
+        url = str(parsed.get("url") or "").strip()
+        if not url or not is_valid_hostname(host):
+            return
+        self.responded.add(host)
+        status = parsed.get("status")
+        detail = str(status) if status else "up"
+        title = str(parsed.get("title") or "").strip()
+        if title:
+            detail = f"{detail}  {title[:48]}"
+        if self.progress is not None:
+            self.progress.hit(url, detail)
+
+    def misses(self) -> None:
+        if self.progress is None:
+            return
+        seen: set[str] = set()
+        for host in self.hosts:
+            key = _normalize_host(host)
+            if not key or key in self.responded or key in seen:
+                continue
+            seen.add(key)
+            self.progress.miss(host, "no response")
+
+
 def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
     step("Live host probing (httpx)", phase="httpprobe")
     alive_file = outdir / "alive.txt"
@@ -3665,75 +3733,83 @@ def stage_httpprobe(subs_file: Path, outdir: Path) -> Path:
         return alive_file
     resolved = outdir / "resolved.txt"
     probe_src = resolved if resolved.exists() and resolved.stat().st_size else subs_file
-    input_count = len([ln for ln in probe_src.read_text(errors="ignore").splitlines() if ln.strip()])
+    hosts = [ln.strip() for ln in probe_src.read_text(errors="ignore").splitlines() if ln.strip()]
+    input_count = len(hosts)
     threads = _httpx_threads()
     info(
         f"📡 probing {input_count} host(s) with httpx "
         f"(src={probe_src.name}, threads={threads}, rate={_rate_profile()})…"
     )
+    progress = None
     try:
-        from progress_ui import tool_checklist
-        cl = tool_checklist(["httpx"], title=f"HTTP probe · {input_count} host(s)", verbose=VERBOSE)
-        cl.start_tool("httpx")
+        from progress_ui import ProbeProgress
+        progress = ProbeProgress(input_count, verbose=VERBOSE).start()
     except Exception:
-        cl = None
+        progress = None
+    feed = _HttpProbeFeed(progress, hosts)
     from hunter.session import httpx_h_flags
     probe_bytes = probe_src.read_bytes()
-    if should_skip_tool(
-        outdir, "httpprobe", "httpx", probe_src, canonical=alive_file,
-    ):
-        info("resume: skip httpx (alive.txt is fresh)")
-        if alive_file.exists() and alive_file.stat().st_size:
-            release_tool_body(outdir, "httpprobe", "httpx")
-            _drop_probe_echoes(outdir)
-            try:
-                write_tech_routes(outdir)
-            except Exception:
-                pass
-            if cl:
-                cl.finish_tool("httpx", skipped=True, detail="resume")
-                cl.stop(final_msg="HTTP probe")
-            return alive_file
-        result = read_tool_bytes(outdir, "httpprobe", "httpx")
-    else:
-        result = pipe_into(
-            [["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
-              "-title", "-sc", "-td", "-fr", "-hash", "sha256", *httpx_h_flags()]],
-            probe_bytes,
-            outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
-        )
-        if not result.strip():
-            # Older httpx builds use long flag names. A real empty probe still retries.
-            # A time cap that printed nothing also retries once with the long flags.
+    ran_probe = False
+    try:
+        if should_skip_tool(
+            outdir, "httpprobe", "httpx", probe_src, canonical=alive_file,
+        ):
+            info("resume: skip httpx (alive.txt is fresh)")
+            if alive_file.exists() and alive_file.stat().st_size:
+                release_tool_body(outdir, "httpprobe", "httpx")
+                _drop_probe_echoes(outdir)
+                try:
+                    write_tech_routes(outdir)
+                except Exception:
+                    pass
+                return alive_file
+            result = read_tool_bytes(outdir, "httpprobe", "httpx")
+        else:
+            ran_probe = True
             result = pipe_into(
                 [["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
-                  "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()]],
+                  "-title", "-sc", "-td", "-fr", "-hash", "sha256", *httpx_h_flags()]],
                 probe_bytes,
                 outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
+                on_stdout=feed.write,
             )
-    text = strip_ansi(result.decode("utf-8", errors="replace"))
-    probe_rc = int(_LAST_PIPE_RC)
-    partial_cap = probe_rc == 124 and bool(text.strip())
-    keep_previous = (
-        alive_file.exists() and alive_file.stat().st_size
-        and (failed_empty(text, probe_rc) or partial_cap)
-    )
-    if keep_previous:
-        if partial_cap:
-            warn("httpx hit the time cap with a partial result; keeping the previous alive.txt")
+            if not result.strip():
+                # Older httpx builds use long flag names. A real empty probe still retries.
+                # A time cap that printed nothing also retries once with the long flags.
+                feed = _HttpProbeFeed(progress, hosts)
+                result = pipe_into(
+                    [["httpx", "-silent", "-threads", threads, "-timeout", "15", "-retries", "2",
+                      "-title", "-status-code", "-tech-detect", "-follow-redirects", *httpx_h_flags()]],
+                    probe_bytes,
+                    outdir=outdir, stage="httpprobe", tool="httpx", cap_key="httpx",
+                    on_stdout=feed.write,
+                )
+        text = strip_ansi(result.decode("utf-8", errors="replace"))
+        probe_rc = int(_LAST_PIPE_RC)
+        partial_cap = probe_rc == 124 and bool(text.strip())
+        keep_previous = (
+            alive_file.exists() and alive_file.stat().st_size
+            and (failed_empty(text, probe_rc) or partial_cap)
+        )
+        if keep_previous:
+            if partial_cap:
+                warn("httpx hit the time cap with a partial result; keeping the previous alive.txt")
+            else:
+                warn("httpx returned nothing after a non-zero exit; keeping the previous alive.txt")
         else:
-            warn("httpx returned nothing after a non-zero exit; keeping the previous alive.txt")
-    else:
-        snapshot_prev(alive_file)
-        write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
-        _filter_wildcard_http(alive_file, outdir, outdir.name)
-        update_asset_diff(outdir, "alive.txt")
-        release_tool_body(outdir, "httpprobe", "httpx")
-    _drop_probe_echoes(outdir)
+            snapshot_prev(alive_file)
+            write_utf8(alive_file, text + ("" if not text or text.endswith("\n") else "\n"))
+            _filter_wildcard_http(alive_file, outdir, outdir.name)
+            update_asset_diff(outdir, "alive.txt")
+            release_tool_body(outdir, "httpprobe", "httpx")
+        _drop_probe_echoes(outdir)
+        if ran_probe and not keep_previous:
+            feed.flush_tail()
+            feed.misses()
+    finally:
+        if progress is not None:
+            progress.stop()
     n = len([ln for ln in alive_file.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()])
-    if cl:
-        cl.finish_tool("httpx", n)
-        cl.stop(final_msg=f"HTTP probe · {input_count} host(s)")
     ok(f"{n}/{input_count} hosts responded -> {alive_file}")
     try:
         from hunter.stages import detect_waf
