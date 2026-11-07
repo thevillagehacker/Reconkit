@@ -1,13 +1,14 @@
 # Reconkit
 
 Reconnaissance engine for authorized bug bounty and penetration tests.
-Detection and safe validation only. The CLI is the engine. The dashboard
-reads the files the CLI already wrote.
+Detection and safe validation only. The CLI is the engine. Findings, proofs,
+and the attack graph are shell commands.
 
 ```bash
-python reconkit.py run --target example.com
-python reconkit.py run --target example.com --review
-python recon_shell.py
+python recon.py example.com
+python recon.py example.com --modules dns,httpprobe
+python recon.py example.com --review
+python recon.py shell
 ```
 
 The target must already be in `~/.reconkit/scope.txt`.

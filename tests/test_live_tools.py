@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def test_tool_cap_clamps():
@@ -84,36 +84,11 @@ def test_resume_skip_respects_flag(tmp_path: Path):
     assert rk.should_skip_tool(tmp_path, "dns", "dnsx-resolved", None) is False
     os.environ["RECON_RESUME"] = "1"
     assert rk.should_skip_tool(tmp_path, "dns", "dnsx-resolved", None) is True
+    rk.write_tool_rc(tmp_path, "dns", "dnsx-resolved", 124)
+    assert rk.should_skip_tool(tmp_path, "dns", "dnsx-resolved", None) is False
+    rk.write_tool_rc(tmp_path, "dns", "dnsx-resolved", 0)
+    assert rk.should_skip_tool(tmp_path, "dns", "dnsx-resolved", None) is True
     os.environ.pop("RECON_RESUME", None)
-
-
-def test_host_diff_and_search(tmp_path: Path):
-    import dashboard.outputs as out
-
-    out.OUTPUT_DIR = tmp_path
-    target = tmp_path / "example.com"
-    target.mkdir()
-    (target / "subdomains.txt").write_text(
-        "a.example.com\nb.example.com\n", encoding="utf-8", newline="\n"
-    )
-    (target / "subdomains.txt.prev").write_text(
-        "a.example.com\nold.example.com\n", encoding="utf-8", newline="\n"
-    )
-    (target / "urls.txt").write_text("https://a.example.com/\n", encoding="utf-8", newline="\n")
-    diff = out.diff_host_file("example.com", "subdomains.txt")
-    assert diff["ok"] is True
-    assert diff["new"] == ["b.example.com"]
-    assert diff["gone"] == ["old.example.com"]
-    fresh = out.diff_host_file("example.com", "urls.txt")
-    assert fresh["has_prev"] is False
-    assert fresh["new"] == []
-    bad = out.diff_host_file("example.com", "../secrets.txt")
-    assert bad["ok"] is False
-    hits = out.search_output("example.com", "old.example")
-    assert hits["ok"] is True
-    assert any("old.example.com" in h["text"] for h in hits["hits"])
-    outside = out.search_output("..", "a")
-    assert outside["ok"] is False
 
 
 def test_param_priority_and_routes(tmp_path: Path):
@@ -147,8 +122,6 @@ if __name__ == "__main__":
         test_live_tool_file_and_drops(p)
     with tempfile.TemporaryDirectory() as d:
         test_resume_skip_respects_flag(Path(d))
-    with tempfile.TemporaryDirectory() as d:
-        test_host_diff_and_search(Path(d))
     with tempfile.TemporaryDirectory() as d:
         test_param_priority_and_routes(Path(d))
     print("ok")

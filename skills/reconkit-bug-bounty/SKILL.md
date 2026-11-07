@@ -1,11 +1,10 @@
 ---
 name: reconkit-bug-bounty
 description: >
-  Master reconkit bug-bounty skill suite entrypoint. Authorized multi-agent recon
-  planning, specialist summaries, analyst reports, FP reduction, safe prove, and
-  PoC drafting. Use for any reconkit agent run. Enforces scope, detection-first,
-  confidence tiers C0-C4, and local-LLM efficiency. Complements skills
-  reconkit-efficiency, reconkit-fp-eval, reconkit-exploit-prove, reconkit-triage-gate.
+  Master reconkit bug-bounty skill. Authorized recon planning for one in-scope
+  target. Detection-first, confidence tiers C0-C4. The runtime loads this file
+  from skills/reconkit-bug-bounty/SKILL.md. Other packs are separate files
+  under skills/ and are attached only when that call needs them.
 license: MIT
 metadata:
   version: "2.2.1"
@@ -16,6 +15,8 @@ metadata:
 # reconkit bug bounty — master skill
 
 You are running **inside reconkit**, not a free-form red teamer.
+
+This file is `skills/reconkit-bug-bounty/SKILL.md`. The runtime already fetched it. Apply the files listed in the prompt. Do not ask for skill files that were not attached. Do not invent a method those files do not contain.
 
 ## Non-negotiable
 
@@ -63,18 +64,16 @@ subdomains
   "done": false,
   "next_agent": "discovery",
   "modules": ["dns", "httpprobe"],
-  "reasoning": "≤40 words",
+  "technique": "none",
+  "reasoning": "at most 40 words",
   "priority": "high"
 }
 ```
 
-- modules ⊆ RUNNABLE_MODULES  
-- ≤3 modules / step  
-- done when core chain complete or remaining is low-ROI  
-
-## Specialist summary
-
-4–8 bullets: counts, top signals, **NEXT modules**, empties/failures. Tag best finding **C0–C2** if clear.
+- modules are chosen from the runnable list, 1 to 3, all owned by next_agent
+- technique is one id from technique_signals, or none
+- done when the core chain is complete or the remaining modules are low value
+- tool counts are already in the user message. Do not restate file bodies
 
 ## Analyst report
 
@@ -92,14 +91,17 @@ Use triage-gate before calling anything “submit”.
 /findings reindex → /notable → /prove queue → /prove run → /graph → /report
 ```
 
-## Suite skills (loaded by role)
+## Other skill files
 
-| Skill | Purpose |
-|-------|---------|
-| reconkit-efficiency | hardware/token budgets |
-| reconkit-fp-eval | kill FPs, C0–C4 |
-| reconkit-exploit-prove | PoC writing + prove map |
-| reconkit-triage-gate | pre-report gates |
+The runtime fetches these only for the call that needs them. Paths are under `skills/<name>/SKILL.md`.
+
+| File | Call |
+|------|------|
+| reconkit-efficiency | planner |
+| reconkit-fp-eval | analyst, critic, phase review |
+| reconkit-exploit-prove | analyst, prove handoff |
+| reconkit-triage-gate | analyst, critic |
+| reconkit-vuln-* | one file, after that module has output |
 
 ## Anti-patterns
 

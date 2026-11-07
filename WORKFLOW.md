@@ -1,6 +1,6 @@
 # reconkit v3.0.0 -- Complete workflow & examples
 
-Ordered hunt: **setup -> authorize -> recon -> program weights -> index -> prove -> graph -> dashboard -> agents (local/cloud + skills) -> report**.
+Ordered hunt: **setup -> authorize -> recon -> program weights -> index -> prove -> graph -> agents (local/cloud + skills) -> report**.
 
 Replace `example.com` with a domain you are **explicitly authorized** to test.
 
@@ -32,7 +32,7 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 11. [Phase I -- Notable, diff, doctor, tips](#11-phase-i--notable-diff-doctor-tips)
 12. [Phase J -- Prove (safe validation)](#12-phase-j--prove-safe-validation)
 13. [Phase K -- Attack graph](#13-phase-k--attack-graph)
-14. [Phase L -- Dashboard (Scan / Findings / Inbox / Proofs / Graph / Insights)](#14-phase-l--dashboard)
+14. [Phase L -- Read results in the shell](#14-phase-l----read-results-in-the-shell)
 15. [Phase M -- Multi-agent LLM (local + cloud + skills)](#15-phase-m--multi-agent-llm-local--cloud--skills)
 16. [Phase N -- Report, critic, jobs](#16-phase-n--report-critic-jobs)
 17. [Phase O -- Session utilities](#17-phase-o--session-utilities)
@@ -48,7 +48,7 @@ Replace `example.com` with a domain you are **explicitly authorized** to test.
 |-------|--------|
 | **A. Interactive shell** (recommended) | `python recon_shell.py` |
 | **B. CLI one-shots** | `python reconkit.py ...` / `recon_prove.py` / `recon_agents.py` |
-| **C. Dashboard** | `python recon_dashboard.py` |
+| **C. Shell** | `python recon.py shell` |
 
 Every shell command supports:
 
@@ -493,8 +493,6 @@ Proofs: `~/.reconkit/output/example.com/proofs/`.
 
 ```bash
 python -c "from graph import build_graph, graph_summary; print(graph_summary(build_graph(target='example.com', min_score=40)))"
-
-curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40" | head
 ```
 
 Nodes: target  /  host  /  url  /  vuln  /  secret  /  proof  /  module  
@@ -502,71 +500,21 @@ Edges: has_asset  /  exposes  /  proved_by  /  from_module  /  ...
 
 ---
 
-## 14. Phase L -- Dashboard
+## 14. Phase L -- Read results in the shell
 
-### Launch
-
-```bash
-python recon_dashboard.py
-python recon_dashboard.py --host 0.0.0.0 --port 8787
-python reconkit.py dashboard --no-browser
-```
+There is no web UI. Read the run from the shell:
 
 ```text
-> /dashboard
-> /dashboard --port 9000 --no-browser
-> /dash
+> /findings reindex
+> /findings example.com
+> /inbox example.com
+> /prove list example.com
+> /graph show example.com
+> /notable example.com
+> /outdir example.com
 ```
 
-Browse: http://127.0.0.1:8787/ (or `http://<VM_IP>:8787/` from host).  
-**Ctrl+F5** after upgrades (cache-bust `app.css?v=8` / `app.js?v=8`).
-
-### Typography & console theme (Bridge UI)
-
-| Surface | Font / colors |
-|---------|----------------|
-| **UI chrome / tables / labels** | `Helvetica Neue`, **Inter**, system UI sans |
-| **Evidence / file preview / mono** | **JetBrains Mono** (Google Fonts) |
-| **Console boxes** | Background `#1a1d24`, text `#a8b0bd` (muted solid -- not neon green) |
-
-Open a recon row -> **source preview** and Proofs **evidence** panels use the mono console theme.
-
-### Tabs
-
-**Scan**  /  **Findings**  /  **Inbox** (C1+ hunter triage)  /  **Proofs**  /  **Graph**  /  **Insights**
-
-### Tabs (detail)
-
-| Tab | Use | Example walkthrough |
-|-----|-----|---------------------|
-| **Scan** | Live module tiles | Watch current phase while `/run` is backgrounded |
-| **Findings** | Filter module/severity/type/notable; open evidence | Module=`nuclei`, Notable only -> open high-score row |
-| **Inbox** | C1+ hunter triage + suggested prove technique | Same as `/inbox` |
-| **Proofs** | Confirmed / needs_manual / ... proofs | Status=`confirmed`, technique=`xss_reflect` |
-| **Graph** | Force-directed attack paths; drag nodes; click detail | Min score `40+`, Reload graph, click edge/node |
-| **Insights** | Bar charts: severity, modules, score buckets, proof status | Pick target -> compare severity vs proof status |
-
-### Controls
-
-- **Live** -- poll disk ~4s (badge LIVE ON)  
-- **Reindex** -- rebuild index without restart (after recon or `/prove run`)  
-- **program:** badge -- active BB profile from `/program set`  
-- Target sidebar -- scopes **all** tabs  
-
-### Useful API
-
-```bash
-curl -s http://127.0.0.1:8787/api/health
-curl -s http://127.0.0.1:8787/api/overview
-curl -s "http://127.0.0.1:8787/api/records?target=example.com&notable=1"
-curl -s "http://127.0.0.1:8787/api/proofs?status=confirmed"
-curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40"
-curl -s "http://127.0.0.1:8787/api/stats/charts?target=example.com"
-curl -s http://127.0.0.1:8787/api/program
-curl -s -X POST http://127.0.0.1:8787/api/reindex
-```
-
-Full API table: **OPERATIONS.md section 12**.
+`/findings reindex` rebuilds the index after recon or `/prove run`.
 
 ---
 
@@ -660,17 +608,16 @@ python recon_agents.py modules
 
 ### M.5 Agent skill suite (automatic)
 
-Skills are Agent Skills-style packs under `skills/` injected into system prompts.
-They work with **any** provider (Ollama or cloud).
+Skill files live under `skills/<name>/SKILL.md`. The runtime reads the files for that call. They work with **any** provider (Ollama or cloud).
 
-| Role | Core skills loaded |
-|------|--------------------|
-| planner | bug-bounty + efficiency + fp-eval |
-| specialist | bug-bounty + fp-eval |
-| analyst | bug-bounty + fp-eval + exploit-prove + triage-gate |
-| critic | fp-eval + triage-gate + exploit-prove |
+| Role | Skill files |
+|------|-------------|
+| planner | bug-bounty + efficiency, plus one matching vuln file |
+| analyst | fp-eval + triage-gate + exploit-prove |
+| critic | fp-eval + triage-gate |
+| review | fp-eval, plus one vuln file for that phase |
 
-**On-demand mini-skills** (max **3 per turn**) load when modules/context match:
+**One vuln skill file** is attached when a finished module matches:
 
 | Skill | Example trigger |
 |-------|-----------------|
@@ -702,7 +649,8 @@ export RECON_AGENT_SKILL=off
 # always merge extras
 export RECON_AGENT_SKILL_EXTRA=reconkit-efficiency
 # char budget (lower for small local models)
-export RECON_AGENT_SKILL_MAX=14000
+export RECON_AGENT_SKILL_MAX=8000
+export RECON_AGENT_SKILL_SURFACE=1
 ```
 
 Details: **skills/README.md**  /  **skills/SKILLS_INDEX.md**  /  **OPERATIONS.md section 14**.
@@ -843,7 +791,7 @@ python reconkit.py findings reindex
 python recon_prove.py queue --target example.com
 python recon_prove.py run --target example.com --dry-run
 python recon_prove.py run --target example.com
-python recon_dashboard.py
+python recon.py shell
 ```
 
 ### 18.2 Full shell hunt (v3.0 features)
@@ -866,9 +814,6 @@ python recon_shell.py
 /prove run example.com
 /graph show example.com
 /report example.com
-/dashboard
-# browser: Recon -> Proofs -> Graph -> Insights
-# fonts: UI Helvetica Neue/Inter; evidence JetBrains Mono #1a1d24
 /exit
 ```
 
@@ -903,13 +848,13 @@ export XAI_API_KEY=xai-...
 python recon_agents.py config set --provider xai --model grok-2-latest
 python recon_agents.py check-llm
 python recon_agents.py run --target example.com --max-steps 8
-# skills still inject (C0-C4 + surface mini-skills)
+# the same skill files load for every provider
 ```
 
 ### 18.5 Surface mini-skill focused pass
 
 ```text
-# XSS surface -> injects reconkit-vuln-xss (among others, max 3)
+# a finished xss module attaches skills/reconkit-vuln-xss/SKILL.md
 /agent example.com --modules xss --max-steps 4
 
 # JS secrets / JWT surface

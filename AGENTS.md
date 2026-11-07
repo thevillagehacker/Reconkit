@@ -1,8 +1,6 @@
 # Agents, prove, programs, graph & skills -- v3.0.0
 
-**Dashboard** (v3.0.0): scan-phase tracker, findings, proofs, attack-path graph,
-and insights. CLI remains the engine; the UI is a local viewer and optional
-scan control panel.
+CLI is the engine. Findings, proofs, and the attack graph are shell commands.
 
 ## Read these first
 
@@ -22,16 +20,11 @@ scan control panel.
 cd path/to/Reconkit
 pip install prompt_toolkit colorama
 
-python recon_shell.py
+python recon.py shell
 # LIVE autocomplete: type /co -> /commands /config
 # /run T --modules  -> module list  /  /keys set  -> key names
 
-python reconkit.py --version
-python recon_dashboard.py
-# Tabs: SCAN | FINDINGS | INBOX | PROOFS | GRAPH | INSIGHTS
-# Default bind: 127.0.0.1:8787  (use --host 0.0.0.0 from a VM)
-# API: GET /api/scan?target=example.com
-# Inbox: GET /api/inbox?target=example.com
+python recon.py --version
 ```
 
 ## Shell map (high level)
@@ -52,7 +45,6 @@ python recon_dashboard.py
 /graph summary|show
 /report /critic
 /config ...  /check-llm  /agent ...
-/dashboard
 ```
 
 Every command: `/cmd -h`  /  full catalog: **OPERATIONS.md**.  
@@ -88,19 +80,11 @@ python recon_prove.py run --target example.com
 
 Maps to confidence **C2** when confirmed (see skill suite below).
 
-## Graph & dashboard
+## Graph
 
 ```text
 /graph show example.com
-/dashboard
-# tabs: Recon | Proofs | Graph | Insights
-# typography: Orbitron + Oxanium UI; JetBrains Mono data
-```
-
-```bash
-curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40"
-curl -s http://127.0.0.1:8787/api/stats/charts
-curl -s "http://127.0.0.1:8787/api/proofs?status=confirmed"
+/graph summary example.com --min-score 40
 ```
 
 ## LLM agents (local + cloud)
@@ -182,14 +166,14 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 | `reconkit-exploit-prove` | Canary PoCs + `/prove` technique map |
 | `reconkit-triage-gate` | Pre-report 7-gate / N/A prevention |
 
-| Role | Skills |
-|------|--------|
-| planner | bug-bounty + efficiency + fp-eval |
-| specialist | bug-bounty + fp-eval |
-| analyst | bug-bounty + fp-eval + exploit-prove + triage-gate |
-| critic | fp-eval + triage-gate + exploit-prove |
+| Role | Skill files loaded for that call |
+|------|----------------------------------|
+| planner | bug-bounty + efficiency, plus one matching vuln file |
+| analyst | fp-eval + triage-gate + exploit-prove |
+| critic | fp-eval + triage-gate |
+| review | fp-eval, plus one vuln file for that phase |
 
-### On-demand mini-skills (max 3 / turn)
+### On-demand vuln skill (one file per call)
 
 | Skill | Example when it loads |
 |-------|------------------------|
@@ -217,8 +201,15 @@ python recon_agents.py agents    # shows suite by role + surface list
 # RECON_AGENT_SKILL=reconkit-bug-bounty   # default
 # RECON_AGENT_SKILL=off
 # RECON_AGENT_SKILL_EXTRA=reconkit-efficiency
-# RECON_AGENT_SKILL_MAX=14000
+# RECON_AGENT_SKILL_MAX=8000
+# RECON_AGENT_SKILL_SURFACE=1
+# RECON_AGENT_HUNT_PHASE=auto | off | phase-00-recon
 ```
+
+Hunting prompts in `skills/bug-bounty-hunting-prompts/phases/` are attached
+in full, unchanged. The planner loads the surface-map phase, and the scope
+phase after crawl, js, or screenshots. The analyst loads triage. `/critic`
+loads the triage-gate phase. `python recon.py agents` prints the map.
 
 ### Worked example
 
@@ -230,7 +221,7 @@ python recon_prove.py run --target example.com --technique xss_reflect
 # confirmed proof ~= C2; write impact manually for C3; /critic for triage-gate
 ```
 
-Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **USAGE.md section 21**  /  **OPERATIONS.md section 14**.
+Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[USAGE.md](USAGE.md#11-agent-skills)**  /  **OPERATIONS.md section 14**.
 
 **Exploit path:** C1 -> `/prove` (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
 No reverse shells / dumps / spray lists in the default path.

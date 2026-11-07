@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 PHASE_OK = (
     "## Landed\nreal hit\n## Noise\nn\n"
@@ -288,13 +288,6 @@ def test_env_roundtrip_and_flags(tmp: Path):
         assert meta["supervisor"] is False
 
 
-def test_dashboard_classifies_reviews():
-    from dashboard.outputs import _classify
-
-    assert _classify("reviews/dns.txt") == ("review", "dns", "review")
-    assert _classify("reviews/summary.txt") == ("review", "summary", "review")
-
-
 def test_unsafe_phase_name_is_rejected(tmp: Path):
     from agents.supervisor import review_phase
 
@@ -324,6 +317,5 @@ if __name__ == "__main__":
     for test in tests:
         with tempfile.TemporaryDirectory() as folder:
             test(Path(folder))
-    test_dashboard_classifies_reviews()
     test_review_flag_stays_on_its_thread()
     print("ok")

@@ -2,7 +2,7 @@
 
 **Docs:** [USAGE.md](USAGE.md)  /  [WORKFLOW.md](WORKFLOW.md)  /  [OPERATIONS.md](OPERATIONS.md)  /  [AGENTS.md](AGENTS.md)  /  [skills/](skills/)
 
-v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph**, **dashboard Graph/Insights**, **multi-provider LLMs**, **agent skill suite** (core + on-demand mini-skills).
+v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph** (`/graph`), **multi-provider LLMs**, **agent skill suite** (core + on-demand mini-skills).
 
 ## Done in 2.2
 
@@ -13,11 +13,7 @@ v3.0.0 = v2.1.0 + **program profiles**, **prove v2**, **attack-path graph**, **d
 | Prove v2: XSS context classification | [x] |
 | Prove v2: OAST SSRF (`oast_base_url`) | [x] |
 | Prove v2: optional `sqli_boolean` (off by default) | [x] |
-| Attack-path graph builder (`graph/`) | [x] |
-| Dashboard **Graph** tab (force layout) | [x] |
-| Dashboard **Insights** charts | [x] |
-| API `/api/graph`, `/api/stats/charts`, `/api/program` | [x] |
-| Dashboard typography (Helvetica Neue / Inter) + JetBrains Mono console | [x] |
+| Attack-path graph (`/graph show`, `/graph summary`) | [x] |
 | **Multi-provider LLM** (Ollama + xAI Grok, Anthropic Claude, Google Gemini/Gemma, OpenAI, OpenRouter, Groq, ...) | [x] |
 | `recon_agents.py providers` + cloud config templates | [x] |
 | **Agent skill suite** (efficiency + FP eval + exploit-prove + triage) | [x] |
@@ -38,7 +34,7 @@ See **[HUNTER.md](HUNTER.md)**.
 | Scoped OSINT + git/trufflehog | [x] |
 | CORS / JWT / GraphQL / redirect / IDOR prove | [x] |
 | HAR import, evidence ZIP, target wordlist, `--resume` | [x] |
-| Hunter inbox (`/inbox`  /  dashboard **INBOX**  /  `/api/inbox`) | [x] |
+| Hunter inbox (`/inbox`) | [x] |
 | SQLite findings query path (`findings/db.py`) | [x] |
 
 ## Done in the hunt console
@@ -49,7 +45,7 @@ See **[HUNTER.md](HUNTER.md)**.
 | Wall-clock caps for dnsx, httpx, tlsx, crawl, nuclei, params, canaries | [x] |
 | `--resume` skips a finished tool file | [x] |
 | `run_meta.json`, `dropped.txt`, `tech_routes.txt`, `param_priority.txt` | [x] |
-| Dashboard live tape, in-file search, host diff, phase prompt, streamed reply | [x] |
+| Shell progress bars and `/diff` between reindex snapshots | [x] |
 | Opt-in phase reviewer (`--review`, notes in `reviews/`) | [x] |
 
 ## Still open (future)

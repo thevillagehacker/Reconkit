@@ -4,8 +4,8 @@ Compiled from patterns in local clones under `git_skills/`
 (Bug-Bounty-Agents, bughunter-ai, claude-bug-bounty, Claude-BugHunter)
 and adapted to **reconkit** (scope gate, modules, prove, findings index).
 
-Skills apply to **local Ollama and cloud** LLMs the same way (prompt injection
-via `agents/skills.py`).
+Skills apply to **local Ollama and cloud** LLMs the same way. `agents/skills.py`
+reads `skills/<name>/SKILL.md` and attaches that file to the call.
 
 ## Design goals (better than source packs)
 
@@ -21,15 +21,15 @@ via `agents/skills.py`).
 
 | Skill | Role | When loaded |
 |-------|------|-------------|
-| `reconkit-bug-bounty` | planner, specialist, analyst | Core recon pipeline + rules |
+| `reconkit-bug-bounty` | planner | Core recon pipeline + rules |
 | `reconkit-efficiency` | planner | Max output per step on local/cloud LLM |
-| `reconkit-fp-eval` | planner, specialist, analyst, critic, prove | Kill false positives fast |
-| `reconkit-exploit-prove` | analyst, critic, prove path | Authorized PoC writing + prove mapping |
+| `reconkit-fp-eval` | analyst, critic, review, prove | Kill false positives fast |
+| `reconkit-exploit-prove` | analyst, prove path | Authorized PoC writing + prove mapping |
 | `reconkit-triage-gate` | analyst, critic | Pre-report 7-question + N/A lists |
 
-### On-demand vuln-class mini-skills (max 3 / turn)
+### On-demand vuln-class skill files (one per call)
 
-Loaded only when modules/context match (saves tokens):
+Loaded only when a finished module or the current text matches:
 
 | Skill | Module triggers | Keyword / context triggers |
 |-------|-----------------|----------------------------|
@@ -42,8 +42,9 @@ Loaded only when modules/context match (saves tokens):
 | `reconkit-vuln-takeover` | `dns`, `nuclei`, `takeover_plus` | takeover, cname, dangling, nxdomain, herokuapp, github.io |
 | `reconkit-vuln-secrets` | `js`, `jsintel`, `cloud`, `gitrecon` | secret, AKIA, aws_key, api_key, private key, `-----BEGIN` |
 
-**Example:** run with `--modules xss` -> surface set may include `reconkit-vuln-xss`
-(and up to two more if other signals match). Cap is always **3**.
+**Example:** after the `xss` module finishes, the next planner call can attach
+`skills/reconkit-vuln-xss/SKILL.md`. The default cap is **one** file
+(`RECON_AGENT_SKILL_SURFACE`).
 
 ## Env
 
@@ -57,8 +58,11 @@ export RECON_AGENT_SKILL=off
 # optional: comma list of extra skills always merged
 export RECON_AGENT_SKILL_EXTRA=reconkit-fp-eval,reconkit-efficiency
 
-# char budget for all injected skill text
-export RECON_AGENT_SKILL_MAX=14000   # try 8000 on small local models
+# char budget for the skill files attached to one call
+export RECON_AGENT_SKILL_MAX=8000
+
+# vuln skill files per call (0-3). Default is 1.
+export RECON_AGENT_SKILL_SURFACE=1
 ```
 
 ## Confidence model (shared)
@@ -115,7 +119,8 @@ python recon_prove.py run --target example.com
 # Shell report path
 # /report example.com
 # /critic example.com
-# /dashboard   -> Proofs + Graph + Insights
+# /prove list example.com
+# /graph show example.com
 ```
 
 ## Role routing (implementation)
@@ -123,20 +128,41 @@ python recon_prove.py run --target example.com
 Source of truth: `agents/skills.py` -> `ROLE_SKILLS`, `MODULE_SURFACE`,
 `SURFACE_SKILLS`, `MAX_SURFACE_SKILLS = 3`.
 
-| Role | Core skills |
+| Role | Skill files |
 |------|-------------|
-| planner | bug-bounty, efficiency, fp-eval |
-| specialist | bug-bounty, fp-eval |
-| analyst | bug-bounty, fp-eval, exploit-prove, triage-gate |
-| critic | fp-eval, triage-gate, exploit-prove |
+| planner | bug-bounty, efficiency, plus one matching vuln file |
+| analyst | fp-eval, triage-gate, exploit-prove, plus one matching vuln file |
+| critic | fp-eval, triage-gate |
+| review | fp-eval, plus one vuln file for that phase |
 | prove | fp-eval, exploit-prove |
+
+Tool modules do not call the model. The planner call is the decision. The analyst call is the report. `--review` writes one note per phase from the review files above.
+
+## Hunting prompts (verbatim)
+
+`skills/bug-bounty-hunting-prompts/` keeps `ADAPTATION.md` and the phase files
+that match this recon project. The loader appends each phase file in full.
+`RECON_AGENT_SKILL_MAX` does not cut it. `RECON_AGENT_HUNT_PHASE=off` skips the
+pack. A comma list of phase filenames replaces the role default.
+
+| Call | Phase file |
+|------|------------|
+| planner | `phase-00-recon.md` |
+| planner, after crawl / js / screenshots | `phase-04a-scope.md`, then `phase-00-recon.md` |
+| analyst | `phase-06-triage.md` |
+| critic | `phase-09-triage-gate.md` |
+| review | `phase-06-triage.md` |
+| review of crawl / js / screenshots | `phase-04a-scope.md`, then `phase-06-triage.md` |
+
+`ADAPTATION.md` is attached with whichever phase file the call loads.
+Prove and the tool step do not load a hunt phase.
 
 Pre-eval (no LLM tokens): `agents/eval.py` before analyst report.
 
 ## See also
 
 - **[README.md](README.md)** -- overview + design principles  
-- **[USAGE.md section 21](../USAGE.md)** -- full usage examples  
+- **[USAGE.md](../USAGE.md#11-agent-skills)** -- skill usage examples  
 - **[OPERATIONS.md section 14](../OPERATIONS.md)** -- CLI catalog  
 - **[WORKFLOW.md Phase M](../WORKFLOW.md)** -- ordered hunt phase  
 - **[AGENTS.md](../AGENTS.md)** -- quick start  

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def test_brief_skips_empty_inputs_and_keeps_ports(tmp: Path):
@@ -104,6 +104,9 @@ def test_planner_user_is_counts_not_a_dump(tmp: Path):
     assert "File counts and heads outrank" in system
     assert "sqlmap" in system
     assert '"done":false' in system
+    assert "skills/reconkit-bug-bounty/SKILL.md" in system
+    assert "skills/reconkit-efficiency/SKILL.md" in system
+    assert "skills/reconkit-fp-eval/SKILL.md" not in system
 
 
 class _PlanModel:
@@ -288,14 +291,68 @@ def test_evidence_is_a_short_head(tmp: Path):
     assert "h4.example.com" not in text
 
 
+def test_hunt_phases_are_attached_verbatim():
+    from agents.skills import HUNT_DIR, HUNT_PHASE_DIR, skill_system_block
+
+    def body(name: str) -> str:
+        return (HUNT_PHASE_DIR / name).read_text(encoding="utf-8")
+
+    start = skill_system_block(role="planner", modules=[])
+    assert body("phase-00-recon.md") in start
+    assert (HUNT_DIR / "ADAPTATION.md").read_text(encoding="utf-8") in start
+    assert "phase-04a-scope.md" not in start
+
+    after = skill_system_block(role="planner", modules=["dns"])
+    assert body("phase-00-recon.md") in after
+    assert "phase-04a-scope.md" not in after
+
+    crawled = skill_system_block(role="planner", modules=["crawl"])
+    for name in ("phase-04a-scope.md", "phase-00-recon.md"):
+        assert body(name) in crawled
+
+    access = skill_system_block(role="planner", context="authenticated session.json")
+    assert body("phase-00-recon.md") in access
+    assert "phase-01-access.md" not in access
+
+    analyst = skill_system_block(role="analyst")
+    assert body("phase-06-triage.md") in analyst
+    assert "phase-09-triage-gate.md" not in analyst
+
+    critic = skill_system_block(role="critic")
+    assert body("phase-09-triage-gate.md") in critic
+    assert "phase-06-triage.md" not in critic
+
+    review = skill_system_block(role="review", modules=["dns"])
+    assert body("phase-06-triage.md") in review
+    assert "phase-04a-scope.md" not in review
+
+    browser_review = skill_system_block(role="review", modules=["js"])
+    assert body("phase-04a-scope.md") in browser_review
+    assert body("phase-06-triage.md") in browser_review
+
+    prove = skill_system_block(role="prove")
+    assert "skills/bug-bounty-hunting-prompts/phases/" not in prove
+
+    on_disk = {p.name for p in HUNT_PHASE_DIR.glob("phase-*.md")}
+    assert on_disk == {
+        "phase-00-recon.md",
+        "phase-04a-scope.md",
+        "phase-06-triage.md",
+        "phase-09-triage-gate.md",
+    }
+    assert not (HUNT_DIR / "SECURITY.md").exists()
+    assert not (HUNT_DIR / "README.md").exists()
+
+
 def test_review_prompts_keep_their_headings():
     from agents.critic import CRITIC_SYSTEM
     from agents.supervisor import _system_prompt, write_summary
-    from dashboard.prompt import _messages
 
-    prompt = _system_prompt(["xss_reflect", "cors_origin"])
+    prompt = _system_prompt(["xss_reflect", "cors_origin"], "xss")
     for heading in ("## Landed", "## Noise", "## Prove next", "## Ignore"):
         assert heading in prompt
+    assert "skills/reconkit-fp-eval/SKILL.md" in prompt
+    assert "skills/reconkit-vuln-xss/SKILL.md" in prompt
     assert "xss_reflect" in prompt
     assert "You do not run tools" in prompt
     src = inspect.getsource(write_summary)
@@ -308,10 +365,41 @@ def test_review_prompts_keep_their_headings():
         "## Suggested next modules",
     ):
         assert heading in CRITIC_SYSTEM
-    messages = _messages("what next", "https://app.example.com", {"path": "alive.txt"})
-    assert "not in the file" in messages[0]["content"]
-    assert "sqlmap" in messages[0]["content"]
-    assert "https://app.example.com" in messages[1]["content"]
+
+
+def test_tool_step_does_not_call_the_model(tmp: Path):
+    from agents.specialists import SpecialistAgent
+    from agents.state import ReconState
+    import agents.specialists as specialists
+
+    class Boom:
+        def chat(self, *_a, **_k):
+            raise AssertionError("tool step called the model")
+
+        def chat_json(self, *_a, **_k):
+            raise AssertionError("tool step called the model")
+
+    def fake_run(modules, target, outdir, state):
+        return [{
+            "module": "subdomains",
+            "success": True,
+            "outputs": [{
+                "path": "subdomains.txt",
+                "exists": True,
+                "lines": 2,
+                "interesting_keywords": [],
+            }],
+        }]
+
+    original = specialists.run_modules
+    specialists.run_modules = fake_run
+    try:
+        state = ReconState(target="example.com", outdir=str(tmp))
+        result = SpecialistAgent("subdomain", Boom()).run(state, modules=["subdomains"])
+    finally:
+        specialists.run_modules = original
+    assert result.success
+    assert "subdomains.txt=2" in result.summary
 
 
 def _skip_names(brief: str) -> list[str]:
@@ -346,6 +434,9 @@ if __name__ == "__main__":
         test_last_step_counts_reach_the_next_plan(Path(directory))
     test_tool_lines_drop_previews()
     with tempfile.TemporaryDirectory() as directory:
+        test_tool_step_does_not_call_the_model(Path(directory))
+    with tempfile.TemporaryDirectory() as directory:
         test_evidence_is_a_short_head(Path(directory))
     test_review_prompts_keep_their_headings()
+    test_hunt_phases_are_attached_verbatim()
     print("ok")

@@ -11,3 +11,4 @@ venv/
 secrets.env
 # large third-party clones used as research only
 git_skills/
+todo.md

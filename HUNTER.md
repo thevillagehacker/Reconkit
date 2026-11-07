@@ -106,7 +106,7 @@ python recon_prove.py run --target example.com --technique redirect_canary
 | Resume a partial run | `/run example.com --resume` (skip stages whose output exists; `--force` to redo) |
 | Evidence ZIP | `/evidence example.com` -> `evidence_<target>_....zip` |
 | Notify | if `notify` CLI is installed, a C1+ vuln count is sent at end of a successful run |
-| Hunter inbox | `/inbox` or dashboard **INBOX** tab (`GET /api/inbox`) |
+| Hunter inbox | `/inbox example.com` |
 
 ```text
 /har import ~/Downloads/app.har example.com
@@ -114,7 +114,7 @@ python recon_prove.py run --target example.com --technique redirect_canary
 /findings reindex
 /inbox example.com
 /evidence example.com
-/dashboard          # SCAN  /  FINDINGS  /  INBOX  /  PROOFS  /  GRAPH  /  INSIGHTS
+/graph show example.com
 ```
 
 ```bash
@@ -122,7 +122,6 @@ python reconkit.py har --target example.com --file capture.har
 python reconkit.py run --target example.com --resume
 python reconkit.py wordlist-target --target example.com
 python reconkit.py evidence --target example.com
-curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
 ```
 
 ---
@@ -178,8 +177,8 @@ records out-of-scope and wildcard drops (capped).
 `reviews/<phase>.txt` is an opt-in model note (`--review` or `RECON_SUPERVISOR=1`).
 The scan still chooses every module. The note says what landed, what to ignore,
 and which existing `/prove` technique is worth a look. `reviews/summary.txt`
-is written at the end of a run that was not stopped. The dashboard lists these
-under the `review` phase.
+is written at the end of a run that was not stopped. Read them as
+`reviews/<phase>.txt` under the target output directory.
 
 Under `~/.reconkit/output/<target>/`:
 

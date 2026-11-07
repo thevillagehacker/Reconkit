@@ -29,7 +29,7 @@ Every user-facing operation the toolkit supports, with **CLI** and **shell** exa
 9. [Program profiles (scoring)](#9-program-profiles-scoring)
 10. [Safe prove / validation](#10-safe-prove--validation)
 11. [Attack graph](#11-attack-graph)
-12. [Dashboard & HTTP API](#12-dashboard--http-api)
+12. [Reading results](#12-reading-results)
 13. [Multi-agent LLM (local + cloud)](#13-multi-agent-llm)
 14. [Agent skill suite (core + on-demand)](#14-agent-skill-suite-core--on-demand)
 15. [Tier A-D analyst tools](#15-tier-ad-analyst-tools)
@@ -45,10 +45,9 @@ Every user-facing operation the toolkit supports, with **CLI** and **shell** exa
 | Launcher | Purpose |
 |----------|---------|
 | `python recon_shell.py` | Interactive cyber shell (recommended) |
-| `python reconkit.py ...` | CLI: setup, scope, run, findings, prove, dashboard |
+| `python reconkit.py ...` | CLI: setup, scope, run, findings, prove |
 | `python recon_prove.py ...` | Safe validation only |
 | `python recon_agents.py ...` | Multi-agent LLM recon |
-| `python recon_dashboard.py` | Web UI (recon / proofs / graph / insights) |
 | `python -m shell` | Same as `recon_shell.py` |
 | `python -m agents` | Same as `recon_agents.py` |
 
@@ -458,12 +457,6 @@ Then:
 /notable
 ```
 
-API:
-
-```bash
-curl -s http://127.0.0.1:8787/api/program
-```
-
 ---
 
 ## 10. Safe prove / validation
@@ -596,157 +589,31 @@ Then re-run `/prove run example.com --technique ssrf_canary_review`.
 
 ```bash
 python -c "from graph import build_graph, graph_summary; g=build_graph(target='example.com', min_score=40); print(graph_summary(g))"
-
-curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40"
 ```
 
-### 11.3 Dashboard
+### 11.3 Shell
 
-Open **Graph** tab -> set min score -> **Reload graph** -> drag nodes -> click for detail.
+```text
+/graph show example.com --min-score 40
+```
 
 ---
 
-## 12. Dashboard & HTTP API
+## 12. Reading results
 
-### 12.1 Launch
-
-```bash
-python recon_dashboard.py
-python recon_dashboard.py --host 0.0.0.0 --port 8787
-python recon_dashboard.py --host 127.0.0.1 --no-browser --no-refresh
-python reconkit.py dashboard --port 9000 --no-browser
-```
+There is no web UI and no HTTP API. Use the shell:
 
 ```text
-/dashboard
-/dashboard --port 9000 --no-browser
-/dashboard --host 127.0.0.1
-/dash
-/ui
+/findings reindex
+/findings example.com
+/inbox example.com
+/prove list example.com
+/prove show example.com --id <proof_id>
+/graph show example.com --min-score 40
+/notable example.com
+/diff example.com
+/outdir example.com
 ```
-
-| URL | When |
-|-----|------|
-| http://127.0.0.1:8787/ | Same machine |
-| http://`<VM_IP>`:8787/ | Host browser -> dashboard in VM |
-
-Hard-refresh after upgrades: **Ctrl+F5** (cache-bust `app.css?v=8` / `app.js?v=8`).
-
-### 12.2 Typography & console theme (Bridge UI)
-
-| Surface | Font / colors |
-|---------|----------------|
-| **UI text** | `Helvetica Neue, Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji` |
-| **Console / evidence / mono** | **JetBrains Mono** (loaded from Google Fonts) |
-| **Evidence / file preview boxes** | Solid background `#1a1d24`, muted foreground `#a8b0bd` (not neon green) |
-
-Evidence panels, source previews, and other "console" blocks use the mono stack above.
-
-### 12.3 UI tabs & controls
-
-| Control | Action | Example |
-|---------|--------|---------|
-| **Scan** | Live module tiles | Play/pause via `/pause` `/stop` |
-| **Findings** | Findings table + filters | Filter module=`nuclei`, notable only |
-| **Inbox** | C1+ hunter triage + suggested prove technique | Same as `/inbox`  /  `GET /api/inbox` |
-| **Proofs** | Validation proofs | Status=`confirmed`, technique=`xss_reflect` |
-| **Graph** | Attack-path force graph | Min score 40+, drag nodes, click detail |
-| **Insights** | Bar charts | Severity mix, top modules, score buckets, proof status |
-| Targets list | Scope all tabs to one domain | Click `example.com` |
-| Live | Poll disk ~4s | Badge shows LIVE ON |
-| Reindex | Rebuild findings index | After `/prove run` or recon |
-| program: badge | Active BB profile | From `/program set` |
-
-**Graph tab example**
-
-1. Run recon + `/findings reindex`  
-2. Open dashboard -> **Graph**  
-3. Set **Min score** to `40+ (notable)`  
-4. Click **Reload graph**  
-5. Drag nodes; click a node -> detail panel  
-
-**Proofs tab example**
-
-1. `/prove run example.com`  
-2. Dashboard -> **Proofs**  
-3. Filter Status = `confirmed`  
-4. Open a row -> evidence + impact  
-
-### 12.4 HTTP API
-
-```bash
-# Health & live status
-curl -s http://127.0.0.1:8787/api/health
-curl -s http://127.0.0.1:8787/api/status
-
-# Overview (recon KPIs + proof counts)
-curl -s http://127.0.0.1:8787/api/overview
-curl -s "http://127.0.0.1:8787/api/overview?target=example.com&notable=1"
-
-# Targets
-curl -s http://127.0.0.1:8787/api/targets
-curl -s http://127.0.0.1:8787/api/targets/example.com
-
-# Records (findings)
-curl -s "http://127.0.0.1:8787/api/records?limit=50&offset=0"
-curl -s "http://127.0.0.1:8787/api/records?target=example.com&module=nuclei&severity=high"
-curl -s "http://127.0.0.1:8787/api/records?notable=1&q=takeover"
-curl -s "http://127.0.0.1:8787/api/findings?type=secret"   # alias
-
-# Proofs
-curl -s "http://127.0.0.1:8787/api/proofs?target=example.com"
-curl -s "http://127.0.0.1:8787/api/proofs?status=confirmed&technique=xss_reflect"
-curl -s http://127.0.0.1:8787/api/proofs/overview
-curl -s http://127.0.0.1:8787/api/proofs/example.com/<proof_id>
-
-# Graph & charts & program
-curl -s "http://127.0.0.1:8787/api/graph?target=example.com&min_score=40"
-curl -s "http://127.0.0.1:8787/api/stats/charts?target=example.com"
-curl -s http://127.0.0.1:8787/api/program
-
-# Diff history (findings snapshots)
-curl -s "http://127.0.0.1:8787/api/diff?target=example.com"
-
-# Host diff of the previous run (subdomains.txt, alive.txt, or urls.txt)
-curl -s "http://127.0.0.1:8787/api/diff?target=example.com&file=subdomains.txt"
-
-# Literal search inside that target's text files
-curl -s "http://127.0.0.1:8787/api/search?target=example.com&q=api.example.com"
-
-# Prompt: one file, or every file in a phase. stream:true returns text/event-stream.
-curl -s -X POST http://127.0.0.1:8787/api/prompt -H "Content-Type: application/json" -d "{\"prompt\":\"summarize\",\"target\":\"example.com\",\"phase\":\"subdomains\",\"stream\":false}"
-
-# File preview (inline JSON). Files > 2 MB set too_large + raw_url instead of content.
-curl -s "http://127.0.0.1:8787/api/file?target=example.com&path=subdomains.txt"
-
-# GitHub-style raw (text/plain in the browser). Cap 50 MB.
-curl -s "http://127.0.0.1:8787/raw/example.com/urls.txt"
-curl -s "http://127.0.0.1:8787/raw/example.com/tools/crawl/katana.txt"
-
-# Hunter inbox (C1+ triage)
-curl -s "http://127.0.0.1:8787/api/inbox?target=example.com"
-
-# Force reindex
-curl -s -X POST http://127.0.0.1:8787/api/reindex
-```
-
-| Method | Path |
-|--------|------|
-| GET | `/api/health` |
-| GET | `/api/status` |
-| GET | `/api/overview` |
-| GET | `/api/targets`  /  `/api/targets/<t>` |
-| GET | `/api/records`  /  `/api/findings` |
-| GET | `/api/proofs`  /  `/api/proofs/overview`  /  `/api/proofs/<t>/<id>` |
-| GET | `/api/graph`  /  `/api/attack-graph` |
-| GET | `/api/stats/charts`  /  `/api/charts` |
-| GET | `/api/program`  /  `/api/programs` |
-| GET | `/api/diff?target=` |
-| GET | `/api/file?target=&path=` |
-| GET | `/raw/<target>/<path>` |
-| GET | `/api/modules` |
-| GET | `/api/inbox`  /  `/api/hunter` |
-| POST | `/api/reindex`  /  `/api/refresh` |
 
 ---
 
@@ -887,30 +754,31 @@ export RECON_AGENT_SKILL=off
 export RECON_AGENT_SKILL_EXTRA=reconkit-efficiency
 
 # Cap injected characters (local small models: lower; cloud: higher OK)
-export RECON_AGENT_SKILL_MAX=14000
+export RECON_AGENT_SKILL_MAX=8000
+export RECON_AGENT_SKILL_SURFACE=1
 ```
 
-### 14.3 Core skills (always role-routed)
+### 14.3 Core skills (fetched per call)
 
 | Skill | Loaded for | Purpose |
 |-------|------------|---------|
-| `reconkit-bug-bounty` | planner, specialist, analyst | Pipeline, scope, anti-patterns |
+| `reconkit-bug-bounty` | planner | Pipeline, scope, anti-patterns |
 | `reconkit-efficiency` | planner | <=3 modules/step, early-stop, token hygiene |
-| `reconkit-fp-eval` | planner, specialist, analyst, critic, prove | C0-C4 tiers, kill-fast FPs |
-| `reconkit-exploit-prove` | analyst, critic, prove | Canary PoC template + prove technique map |
+| `reconkit-fp-eval` | analyst, critic, review, prove | C0-C4 tiers, kill-fast FPs |
+| `reconkit-exploit-prove` | analyst, prove | Canary PoC template + prove technique map |
 | `reconkit-triage-gate` | analyst, critic | Pre-report 7-question / N/A prevention |
 
-| Role | Skills (core) |
-|------|----------------|
-| planner | bug-bounty + efficiency + fp-eval |
-| specialist | bug-bounty + fp-eval |
-| analyst | bug-bounty + fp-eval + exploit-prove + triage-gate |
-| critic | fp-eval + triage-gate + exploit-prove |
+| Role | Skill files |
+|------|-------------|
+| planner | bug-bounty + efficiency, plus one matching vuln file |
+| analyst | fp-eval + triage-gate + exploit-prove |
+| critic | fp-eval + triage-gate |
+| review | fp-eval, plus one vuln file for that phase |
 | prove | fp-eval + exploit-prove |
 
-### 14.4 On-demand vuln-class mini-skills (max 3 / turn)
+### 14.4 On-demand vuln skill file (one per call)
 
-Loaded only when **modules** or **context text** match -- saves tokens.
+Loaded when a finished module or the current text matches.
 
 | Skill | Example triggers |
 |-------|------------------|
@@ -980,6 +848,7 @@ skills/
   reconkit-vuln-sqli/SKILL.md
   reconkit-vuln-takeover/SKILL.md
   reconkit-vuln-secrets/SKILL.md
+  bug-bounty-hunting-prompts/   # ADAPTATION.md plus recon, scope, and triage phases
 agents/skills.py    # loader
 agents/eval.py      # heuristic tiers
 ```
@@ -1036,7 +905,7 @@ Writes `report_draft.md` (includes proofs section when present).
 /rag open redirect
 ```
 
-Sources: `bug_bounty_tips.md`, `~/.reconkit/notes/`.
+Sources: `skills/**/*.md`, `~/.reconkit/notes/`.
 
 ### 15.6 critic (LLM)
 
@@ -1047,7 +916,7 @@ Sources: `bug_bounty_tips.md`, `~/.reconkit/notes/`.
 ```
 
 Needs working `/check-llm` and `agent_report.md` or `report_draft.md`.  
-Writes `critic_review.md`. Skills (fp-eval + triage-gate + exploit-prove) inject when critic runs.
+Writes `critic_review.md`. The critic call loads `reconkit-fp-eval` and `reconkit-triage-gate`.
 
 ---
 
@@ -1128,7 +997,6 @@ python recon_prove.py -h
 python recon_agents.py -h
 python recon_agents.py config -h
 python recon_agents.py run -h
-python recon_dashboard.py -h
 python recon_shell.py -h
 ```
 
@@ -1238,11 +1106,8 @@ python recon_shell.py
 /prove run example.com
 /graph show example.com
 /report example.com
-/dashboard
+/notable example.com
 ```
-
-In the browser (Ctrl+F5 once): **Recon** -> **Proofs** -> **Graph** -> **Insights**.  
-UI: Helvetica Neue/Inter; evidence console: JetBrains Mono on solid `#1a1d24`.
 
 ### Agents -- local Ollama
 
@@ -1288,7 +1153,6 @@ Skills (C0-C4 + surface mini-skills) load automatically for either local or clou
 
 - Written authorization before `/scope add`
 - Detection + **safe** validation only by default
-- Do not expose dashboard (`0.0.0.0`) to the public internet
 - Secrets stay in `~/.reconkit/secrets.env`
 - Treat `~/.reconkit/output` as sensitive
 
