@@ -5261,6 +5261,13 @@ def _cmd_run_stages(modules, target, outdir, subs_file, alive_file, urls_file, w
 # argparse wiring
 # --------------------------------------------------------------------------- #
 
+def cmd_view(args) -> None:
+    """Open the local scan view. It follows a scan; it does not start one."""
+    from shell.view import open_view
+
+    open_view(getattr(args, "target", "") or "")
+
+
 def cmd_shell(_args) -> None:
     """Launch the cyber interactive shell (v3.0.0)."""
     from shell import ReconShell
@@ -5543,6 +5550,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shell_parser.add_argument("--target", default="", help="Pre-select target in the shell")
     shell_parser.set_defaults(func=cmd_shell)
+
+    view_parser = sub.add_parser(
+        "view",
+        help="Open the local scan view for a target (does not start a scan)",
+    )
+    view_parser.add_argument("--target", default="", help="Target whose output to follow")
+    view_parser.set_defaults(func=cmd_view)
 
     findings_parser = sub.add_parser(
         "findings",

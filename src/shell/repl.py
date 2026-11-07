@@ -263,7 +263,7 @@ class ReconShell:
                 except Exception:
                     pass
 
-        print(theme._c("  [//] session ended. stay in authorized scope.", theme.C().ORANGE))
+        print(theme._c("  session ended. stay in authorized scope.", theme.C().GRAY))
         print()
 
     def _print_quick_tips(self) -> None:
@@ -674,6 +674,14 @@ class ReconShell:
 
     def cmd_banner(self, _args: list[str]) -> None:
         theme.print_banner(self.VERSION)
+
+    def cmd_view(self, args: list[str]) -> None:
+        target = args[0] if args else (self.target or "")
+        try:
+            from shell.view import open_view
+            open_view(target)
+        except SystemExit as exc:
+            rk.fail(str(exc))
 
     def cmd_clear(self, _args: list[str]) -> None:
         theme.clear_screen()

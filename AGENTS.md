@@ -34,7 +34,7 @@ python recon.py --version
 /session show|set|clear
 /har import  /inbox  /evidence  /wordlist-target
 /target /verbose /rate
-/run /quick /full /scan /playbook   # background by default; --fg blocks; --review writes phase notes
+/run /quick /full /scan /playbook /view   # background by default; --fg blocks; --review writes phase notes
 /pause /resume /stop /jobs
 /findings reindex
 /program list|show|set

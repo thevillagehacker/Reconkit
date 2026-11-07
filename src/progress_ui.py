@@ -121,51 +121,28 @@ SHIP_ART: dict[str, tuple[str, ...]] = {
     k: tuple(_ship_lines(k)) for k in list(FLEET_SHIPS.keys())
 }
 
-# ANSI accent per module
-_SHIP_COLORS: dict[str, str] = {
-    "subdomains": "\033[38;5;80m",
-    "dns": "\033[38;5;117m",
-    "httpprobe": "\033[38;5;141m",
-    "tls": "\033[38;5;183m",
-    "crawl": "\033[38;5;212m",
-    "js": "\033[38;5;210m",
-    "params": "\033[38;5;222m",
-    "content": "\033[38;5;214m",
-    "xss": "\033[38;5;203m",
-    "sqli": "\033[38;5;196m",
-    "ssrf_ssti": "\033[38;5;160m",
-    "nuclei": "\033[38;5;196m",
-    "cloud": "\033[38;5;87m",
-    "screenshots": "\033[38;5;114m",
-    "pipeline": "\033[38;5;214m",
-    "default": "\033[38;5;80m",
-}
-
-
 def fleet_ship_art(phase: str) -> tuple[str, ...]:
     """Optional ASCII art for a module (usually empty)."""
     key = (phase or "default").lower().strip()
     return tuple(_ship_lines(key))
 
 
+_ACCENT = "\033[38;5;73m"
+
+
 def fleet_ship_color(phase: str) -> str:
-    key = (phase or "default").lower().strip()
-    return _SHIP_COLORS.get(key, _SHIP_COLORS["default"])
+    del phase
+    return _ACCENT
 
 
 def fleet_ship_line(phase: str, detail: str = "") -> str:
     """One-line phase header for pipeline stages."""
     key = (phase or "default").lower().strip()
-    ship, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
-    title = PHASE_TITLE.get(key, key.upper())
+    name, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
+    extra = f"  {detail}" if detail else ""
     if _color_on():
-        ac = fleet_ship_color(key)
-        return (
-            f"  {_BOLD}{_YELLOW}✦{_R} "
-            f"{_BOLD}{_WHITE}{ship}{_R}  {_GRAY}[{klass}]{_R}  "
-            f"{ac}{title}{_R}"
-        )
-    return f"  ✦ {ship}  [{klass}]  {title}"
+        return f"  {_BOLD}{_ACCENT}{name}{_R}  {_GRAY}{klass}{extra}{_R}"
+    return f"  {name}  {klass}{extra}"
 
 
 def print_module_ship_banner(
@@ -176,24 +153,20 @@ def print_module_ship_banner(
     detail: str = "",
     animate: bool = True,
 ) -> None:
-    """Minimal cyber ops phase line: unit name + phase only."""
+    """One phase line: index, name, and kind."""
+    del animate
     key = (phase or "default").lower().strip()
-    ship, _klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
-    phase_name = key.replace("_", " ")
-    idx = f"  [{index}/{total}]" if total else ""
+    del detail
+    name, klass = FLEET_SHIPS.get(key, FLEET_SHIPS["default"])
+    idx = f"{index}/{total}  " if total else ""
 
     with _IO:
         print()
         if _color_on():
-            print(
-                f"  {_BOLD}{_RED}[//]{_R} "
-                f"{_BOLD}{_WHITE}{ship}{_R}"
-                f"{_GRAY}{idx}{_R}"
-                f"  {_GRAY}|{_R}  "
-                f"{fleet_ship_color(key)}{phase_name}{_R}"
-            )
+            amber = "\033[38;5;179m"
+            print(f"  {_GRAY}{idx}{_R}{_BOLD}{_ACCENT}{name}{_R}  {amber}{klass}{_R}")
         else:
-            print(f"  [//] {ship}{idx}  |  {phase_name}")
+            print(f"  {idx}{name}  {klass}")
         sys.stdout.flush()
 
 _IO = threading.RLock()
@@ -1469,69 +1442,21 @@ class HostProgress:
         self.close()
 
 
-def _box_inner_pad(text: str, inner_width: int) -> str:
-    """
-    Pad plain text to exactly inner_width display columns.
-
-    Avoid emoji/VS16 in box titles — many Linux fonts render 🛰️ as a lone
-    variation-selector glyph, and .ljust() ignores double-width cells so the
-    right border drifts.
-    """
-    # Strip any accidental ANSI before measuring
-    plain = _plain(text)
-    if len(plain) > inner_width:
-        if inner_width <= 3:
-            return plain[:inner_width]
-        return plain[: inner_width - 1] + "…"
-    return plain + (" " * (inner_width - len(plain)))
-
-
 def _print_ops_banner(target: str, modules: list[str]) -> None:
-    """Pipeline start box — aligned borders, module route."""
-    width = 72
-    inner = width - 2
-    total = len(modules)
+    """Plain header when a scan starts."""
     tgt = target or "target"
-    phases_s = f"{total} SHIP{'S' if total != 1 else ''}"
-    prefix = "  ▶  RECON  ·  "
-    mid = "  ·  "
-    room = inner - len(prefix) - len(mid) - len(phases_s)
-    if room < 8:
-        room = 8
-    tgt_disp = tgt if len(tgt) <= room else (tgt[: room - 1] + "…")
-    title = _box_inner_pad(f"{prefix}{tgt_disp}{mid}{phases_s}", inner)
-
-    # Short fleet names on route (colored per ship)
-    fleet_bits_plain = []
-    fleet_bits_color = []
-    for m in modules:
-        ship, _klass = FLEET_SHIPS.get(m, (m, ""))
-        short = ship.replace("USS ", "") if ship.startswith("USS ") else m
-        fleet_bits_plain.append(short)
-        ac = fleet_ship_color(m) if _color_on() else ""
-        fleet_bits_color.append(f"{ac}{short}{_R}" if _color_on() else short)
-
+    amber = "\033[38;5;179m"
+    print()
     if _color_on():
-        print()
-        print(_c(_BOLD, _YELLOW) + "╔" + "═" * inner + "╗" + _R)
-        print(
-            _c(_BOLD, _YELLOW) + "║" + _R
-            + _c(_BOLD, _WHITE) + title + _R
-            + _c(_BOLD, _YELLOW) + "║" + _R
-        )
-        print(_c(_BOLD, _YELLOW) + "╚" + "═" * inner + "╝" + _R)
-        arrow = f"{_GRAY} → {_R}"
-        print(f"{_GRAY}  modules: {_R}" + arrow.join(fleet_bits_color))
-        print(_c(_GRAY) + "  orders: /pause  /resume  /stop  ·  /jobs  ·  /findings" + _R)
-        print()
+        names = f"{_GRAY}, {_R}".join(f"{_ACCENT}{m}{_R}" for m in modules)
+        print(f"  {_BOLD}{_GREEN}{tgt}{_R}  {_GRAY}{len(modules)} modules{_R}")
+        print(f"  {names}")
+        print(f"  {amber}/pause{_R}   {amber}/resume{_R}   {amber}/stop{_R}")
     else:
-        print()
-        print("+" + "-" * inner + "+")
-        print("|" + title + "|")
-        print("+" + "-" * inner + "+")
-        print("  modules: " + " → ".join(fleet_bits_plain))
-        print("  orders: /pause  /resume  /stop  ·  /jobs")
-        print()
+        print(f"  {tgt}  {len(modules)} modules")
+        print("  " + ", ".join(modules))
+        print("  /pause   /resume   /stop")
+    print()
 
 
 @dataclass

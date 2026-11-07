@@ -51,6 +51,7 @@ Other docs: [AGENTS.md](AGENTS.md), [HUNTER.md](HUNTER.md),
 | Evidence zip | `python recon.py evidence --target example.com` |
 | Target wordlist | `python recon.py wordlist-target --target example.com` |
 | Shell | `python recon.py shell` |
+| Scan view | `python recon.py view example.com` |
 | Quick scan | `/quick example.com` |
 | Full scan | `/full example.com` |
 | Module picker | `/scan example.com` |

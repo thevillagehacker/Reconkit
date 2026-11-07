@@ -37,6 +37,7 @@ Results:
   python recon.py findings <target>
   python recon.py prove <target>
   python recon.py shell
+  python recon.py view <target>
 
 Agents:
   python recon.py agents
@@ -59,6 +60,7 @@ COMMANDS = {
     "modules",
     "keys",
     "shell",
+    "view",
     "findings",
     "prove",
     "session",
@@ -178,10 +180,10 @@ def normalize_recon(args: list[str]) -> list[str] | None:
         if len(tail) == 1 and looks_like_target(tail[0]):
             return ["findings", "summary", tail[0]]
         return args
-    if command == "shell":
+    if command in {"shell", "view"}:
         tail = args[1:]
         if tail and looks_like_target(tail[0]) and "--target" not in tail:
-            return ["shell", "--target", tail[0], *tail[1:]]
+            return [command, "--target", tail[0], *tail[1:]]
         return args
     return args
 

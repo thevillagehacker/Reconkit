@@ -1,26 +1,13 @@
-"""ASCII banner + per-module labels for the console."""
+"""Per-module labels for the console."""
 
 from __future__ import annotations
 
-RECONKIT_WORDMARK = r"""
- ____  _____ ____ ___  _   _ _  _____ _____
-|  _ \| ____/ ___/ _ \| \ | | |/ /_ _|_   _|
-| |_) |  _|| |  | | | |  \| | ' / | |  | |
-|  _ <| |__| |__| |_| | |\  | . \ | |  | |
-|_| \_\_____\____\___/|_| \_|_|\_\___| |_|
-""".strip("\n")
-
-CYBER_BANNER = r"""
-  .--------------------------------------------------------------.
-  |  RECONKIT  ·  authorized recon                               |
-  |  passive + detection canaries  ·  no exploit frameworks      |
-  '--------------------------------------------------------------'
-""".strip("\n")
+CYBER_BANNER = "authorized reconnaissance  ·  detection and safe validation"
 
 CYBER_SCAN_LINES = [
-    "  > loading config...",
-    "  > scope gate online",
-    "  > ready  ·  type /help",
+    ("/help", "command list"),
+    ("/run <target>", "scan a host already in scope"),
+    ("/modules", "what each stage writes"),
 ]
 
 FLAGSHIP = ""

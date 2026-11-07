@@ -137,15 +137,29 @@ COMMANDS: list[Command] = [
     Command(
         "banner", [],
         "/banner",
-        "Re-draw the cyber banner",
+        "Redraw the banner",
         _ht(
-            "Reprints the reconkit ASCII banner and quick tips.",
+            "Reprints the reconkit banner and quick tips.",
             "Useful after /clear or a long scroll of scan output.",
             "",
             "Examples:",
             "  /banner",
         ),
         "shell", "cmd_banner",
+    ),
+    Command(
+        "view", [],
+        "/view [target]",
+        "Open the local scan view",
+        _ht(
+            "Opens a window that follows a scan. It does not start one.",
+            "Leave it open in its own terminal while /run works in the shell.",
+            "",
+            "Examples:",
+            "  /view",
+            "  /view example.com",
+        ),
+        "shell", "cmd_view",
     ),
     Command(
         "clear", ["cls"],
