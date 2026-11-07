@@ -19,4 +19,4 @@ Output lands in `~/.reconkit/output/<target>/`. Each tool writes
 and `reviews/summary.txt` when the run finishes. A normal run does not call
 a model. `/stop` skips the summary.
 
-Command catalog: [USAGE.md](USAGE.md), [OPERATIONS.md](OPERATIONS.md), [HUNTER.md](HUNTER.md).
+Command catalog: [USAGE.md](USAGE.md), [HUNTER.md](HUNTER.md).

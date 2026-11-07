@@ -4,7 +4,7 @@ Authorized bug-bounty / VDP recon extras used by a hunter or OSE. Detection
 and safe prove only -- no sqlmap, shells, dumps, credential spray, or
 internet-wide mass scan.
 
-**Related:** [USAGE.md](USAGE.md)  /  [OPERATIONS.md](OPERATIONS.md)  /  [WORKFLOW.md](WORKFLOW.md)
+**Related:** [USAGE.md](USAGE.md)  /  [AGENTS.md](AGENTS.md)
 
 Tiers below match how the extras were added: **use Tier 1 first**, then 2-4.
 
@@ -40,9 +40,9 @@ Tiers below match how the extras were added: **use Tier 1 first**, then 2-4.
 ```
 
 ```bash
-python reconkit.py session set --cookie "sid=abc" --header "Authorization: Bearer ..."
-python reconkit.py run --target example.com --modules jsintel,apis,bypass403,takeover_plus
-python reconkit.py run --scope-all --modules subdomains,dns,httpprobe
+python recon.py session set --cookie "sid=abc" --header "Authorization: Bearer ..."
+python recon.py run --target example.com --modules jsintel,apis,bypass403,takeover_plus
+python recon.py run --scope-all --modules subdomains,dns,httpprobe
 ```
 
 ---
@@ -90,9 +90,9 @@ Matching recon modules: `redirect`, `cors`, `graphql` (detection), then `/prove`
 ```
 
 ```bash
-python recon_prove.py run --target example.com --technique jwt_inspect
-python recon_prove.py run --target example.com --technique graphql_typename
-python recon_prove.py run --target example.com --technique redirect_canary
+python recon.py prove run --target example.com --technique jwt_inspect
+python recon.py prove run --target example.com --technique graphql_typename
+python recon.py prove run --target example.com --technique redirect_canary
 ```
 
 ---
@@ -103,7 +103,7 @@ python recon_prove.py run --target example.com --technique redirect_canary
 |---------|-----|
 | HAR import | `/har import capture.har example.com` -- in-scope URLs -> `urls.txt`; Cookie -> session |
 | Target wordlist | `/wordlist-target example.com` -> `wordlist_target.txt` |
-| Resume a partial run | `/run example.com --resume` (skip stages whose output exists; `--force` to redo) |
+| Resume a partial run | `/run example.com --resume` skips a finished tool file. Exit 124 runs that tool again. `--force` redoes the work. |
 | Evidence ZIP | `/evidence example.com` -> `evidence_<target>_....zip` |
 | Notify | if `notify` CLI is installed, a C1+ vuln count is sent at end of a successful run |
 | Hunter inbox | `/inbox example.com` |
@@ -118,10 +118,10 @@ python recon_prove.py run --target example.com --technique redirect_canary
 ```
 
 ```bash
-python reconkit.py har --target example.com --file capture.har
-python reconkit.py run --target example.com --resume
-python reconkit.py wordlist-target --target example.com
-python reconkit.py evidence --target example.com
+python recon.py har --target example.com --file capture.har
+python recon.py run --target example.com --resume
+python recon.py wordlist-target --target example.com
+python recon.py evidence --target example.com
 ```
 
 ---
@@ -140,7 +140,7 @@ One dnsx pass writes resolved hosts, records, and CNAME lines. httpx probes
 before naabu. tls, well-known, ports, and crawl overlap after alive.txt and
 join before js. xss, sqli, ssrf, and gfextra share one URL classification.
 
-List descriptions anytime: `/modules` or `python reconkit.py modules`.
+List descriptions anytime: `/modules` or `python recon.py modules`.
 
 Playbooks: `auth-surface`, `hunter` (includes enum/crawl/js so extras have inputs),
 `api-surface`, `js-deep`, `ports-hint`, `content-light`, `prove-prep`,
@@ -166,10 +166,14 @@ subdomains.txt          # already has subfinder names
 Amass runs with the other passive sources and is capped at 180s (`RECON_AMASS_TIMEOUT`, max 900). dnsx, httpx,
 tlsx, crawl, and each nuclei pack have their own caps (`RECON_DNSX_TIMEOUT`,
 `RECON_HTTPX_TIMEOUT`, `RECON_TLSX_TIMEOUT`, `RECON_CRAWL_TIMEOUT`,
-`RECON_NUCLEI_TIMEOUT`). A cap keeps the partial file and moves on. The same
-files grow while the tool is still printing. Kill a hung scan with `/stop`.
+`RECON_NUCLEI_TIMEOUT`). A cap records exit 124 beside that tool file, and
+`--resume` runs the tool again. When httpx hits the cap and `alive.txt` already
+lists hosts, the previous host list stays. A missing httpx or crawler leaves
+`alive.txt` and `urls.txt` in place. Kill a hung scan with `/stop`.
 
-`--resume` skips a finished tool file. `run_meta.json` records the run.
+`--resume` skips a finished tool file. A missing `.rc` marker counts as finished.
+An older run that has only the merged file and no `tools/<stage>/` files still
+skips that stage. `run_meta.json` records the run.
 `tech_routes.txt` lists `/prove` techniques that match files already on disk.
 `param_priority.txt` is a short parameter list. `tools/<stage>/dropped.txt`
 records out-of-scope and wildcard drops (capped).

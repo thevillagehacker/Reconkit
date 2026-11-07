@@ -4,8 +4,8 @@ Agent Skills ([agentskills.io](https://agentskills.io) format) for **maximum
 efficiency** on local **and cloud** LLMs: less noise, fewer false positives,
 structured PoC promotion -- without shipping weaponized exploit packs.
 
-Works with every provider supported by `agents/llm.py` (Ollama, Grok, Claude,
-Gemini/Gemma, OpenAI, OpenRouter, Groq, ...). `agents/skills.py` reads the
+Works with every provider supported by `src/agents/llm.py` (Ollama, Grok, Claude,
+Gemini/Gemma, OpenAI, OpenRouter, Groq, ...). `src/agents/skills.py` reads the
 `SKILL.md` files and attaches the ones for that call. The files do not call
 the network.
 
@@ -41,10 +41,12 @@ to `0`, `2`, or `3` if you want a different cap.
 ## How a model call loads skills
 
 ```text
-planner   -> skills/reconkit-bug-bounty/SKILL.md
-             skills/reconkit-efficiency/SKILL.md
-             + one vuln file if a finished module matches
-analyst   -> fp-eval + triage-gate + exploit-prove (+ one vuln file)
+planner    -> skills/reconkit-bug-bounty/SKILL.md
+              skills/reconkit-efficiency/SKILL.md
+              + one vuln file if a finished module matches
+specialist -> skills/reconkit-bug-bounty/SKILL.md
+              + one vuln file if a finished module matches
+analyst    -> fp-eval + triage-gate + exploit-prove (+ one vuln file)
 critic    -> fp-eval + triage-gate (+ one vuln file from the report text)
 review    -> fp-eval (+ one vuln file for that phase)
 prove     -> fp-eval + exploit-prove
@@ -60,7 +62,7 @@ budget does not cut them. See **SKILLS_INDEX.md** for which call loads which
 phase. Set `RECON_AGENT_HUNT_PHASE=phase-00-recon` to force one file, or `off`
 to skip the pack.
 
-Zero-token pre-eval: `agents/eval.py` runs heuristics before the analyst.
+Zero-token pre-eval: `src/agents/eval.py` runs heuristics before the analyst.
 
 ## Commands & examples
 
@@ -68,7 +70,7 @@ Zero-token pre-eval: `agents/eval.py` runs heuristics before the analyst.
 
 ```bash
 cd path/to/Reconkit
-python recon_agents.py agents
+python recon.py agents
 # -> primary skill path
 # -> suite by role (planner / specialist / analyst / critic / prove)
 # -> surface: (on-demand) reconkit-vuln-...
@@ -78,9 +80,9 @@ python recon_agents.py agents
 ### Default hunt (skills on)
 
 ```bash
-python recon_agents.py check-llm
-python recon_agents.py run --target example.com --dry-run
-python recon_agents.py run --target example.com --max-steps 8
+python recon.py agents check-llm
+python recon.py agents run --target example.com --dry-run
+python recon.py agents run --target example.com --max-steps 8
 # planner and analyst load the skill files for that call
 ```
 
@@ -94,14 +96,14 @@ python recon_agents.py run --target example.com --max-steps 8
 
 ```bash
 # a finished xss module attaches skills/reconkit-vuln-xss/SKILL.md
-python recon_agents.py run --target example.com --modules xss --max-steps 4
+python recon.py agents run --target example.com --modules xss --max-steps 4
 
 # JS -> secrets + jwt candidates
-python recon_agents.py run --target example.com --modules crawl,js --max-steps 4
+python recon.py agents run --target example.com --modules crawl,js --max-steps 4
 
 # After tools write files:
-python reconkit.py findings reindex
-python recon_prove.py run --target example.com --technique xss_reflect
+python recon.py findings reindex
+python recon.py prove run --target example.com --technique xss_reflect
 ```
 
 ### Disable or tune
@@ -109,7 +111,7 @@ python recon_prove.py run --target example.com --technique xss_reflect
 ```bash
 # Disable all skill injection
 export RECON_AGENT_SKILL=off
-python recon_agents.py run --target example.com --max-steps 4
+python recon.py agents run --target example.com --max-steps 4
 
 # Default primary
 export RECON_AGENT_SKILL=reconkit-bug-bounty
@@ -128,9 +130,9 @@ export RECON_AGENT_SKILL_SURFACE=1
 
 ```bash
 export XAI_API_KEY=xai-...
-python recon_agents.py config set --provider xai --model grok-2-latest
-python recon_agents.py check-llm
-python recon_agents.py run --target example.com --max-steps 8
+python recon.py agents config set --provider xai --model grok-2-latest
+python recon.py agents check-llm
+python recon.py agents run --target example.com --max-steps 8
 # C0-C4 rules still apply -- skills are provider-agnostic
 ```
 
@@ -190,5 +192,5 @@ skills/
     phases/phase-09-triage-gate.md
 ```
 
-Loader: `agents/skills.py`  /  pre-eval: `agents/eval.py`  
-User docs: **[USAGE.md](../USAGE.md#11-agent-skills)**  /  **OPERATIONS.md section 14**  /  **WORKFLOW.md Phase M**  /  **[HUNTER.md](../HUNTER.md)**.
+Loader: `src/agents/skills.py`  /  pre-eval: `src/agents/eval.py`  
+User docs: **[USAGE.md](../USAGE.md#11-agent-skills)**  /  **[HUNTER.md](../HUNTER.md)**  /  **[AGENTS.md](../AGENTS.md)**.

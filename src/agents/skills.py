@@ -4,11 +4,13 @@ Load skill files from skills/ into one model call.
 Layout (agentskills.io compatible):
   skills/<skill-name>/SKILL.md
   skills/<skill-name>/references/*.md
-  skills/SKILLS_INDEX.md
+  skills/bug-bounty-hunting-prompts/ADAPTATION.md
+  skills/bug-bounty-hunting-prompts/phases/<phase>.md
 
-The runtime reads the files. The prompt lists those paths and attaches the
-bodies. The model does not get a second copy of the pipeline, and it does not
-get every vuln pack on every step.
+The runtime reads those files. skills/SKILLS_INDEX.md is the human map.
+The prompt lists the loaded paths and attaches the bodies. The model does
+not get a second copy of the pipeline, and it does not get every vuln pack
+on every step.
 
 Env:
   RECON_AGENT_SKILL=reconkit-bug-bounty   # primary (or off)

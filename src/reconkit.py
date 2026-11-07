@@ -5504,7 +5504,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--resume", action="store_true",
-        help="Skip modules whose primary output already exists",
+        help=(
+            "Skip a finished tool file. Exit 124 runs that tool again. "
+            "An older run with only the merged file still skips that stage."
+        ),
     )
     run_parser.add_argument(
         "--force", action="store_true",

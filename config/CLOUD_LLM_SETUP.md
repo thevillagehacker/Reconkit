@@ -50,12 +50,12 @@ setx XAI_API_KEY "xai-your-real-key"
 ### 3. Point recon at the cloud provider
 
 ```powershell
-cd C:\Users\navee\GitHub\Bug_Bounty\scripts\v2.2.0
+cd path\to\Reconkit
 
-python recon_agents.py providers
-python recon_agents.py config set --provider xai --model grok-2-latest
-python recon_agents.py config show
-python recon_agents.py check-llm
+python recon.py agents providers
+python recon.py agents config set --provider xai --model grok-2-latest
+python recon.py agents config show
+python recon.py agents check-llm
 ```
 
 Expect: `OK -- model replied: pong` (or similar).
@@ -64,10 +64,10 @@ Expect: `OK -- model replied: pong` (or similar).
 
 ```powershell
 # dry-run plan only
-python recon_agents.py run --target example.com --dry-run
+python recon.py agents run --target example.com --dry-run
 
 # real run (target must be in scope)
-python recon_agents.py run --target example.com --max-steps 8
+python recon.py agents run --target example.com --max-steps 8
 ```
 
 From the interactive shell:
@@ -83,13 +83,13 @@ From the interactive shell:
 ## Option B -- Copy the example config file
 
 ```powershell
-cd C:\Users\navee\GitHub\Bug_Bounty\scripts\v2.2.0
+cd path\to\Reconkit
 
 copy config\agent_config.cloud-example.json config\agent_config.json
 # edit provider/model if you want something other than Grok
 
 $env:XAI_API_KEY = "xai-..."
-python recon_agents.py check-llm
+python recon.py agents check-llm
 ```
 
 The example file looks like this (keys stay empty -- use env):
@@ -123,23 +123,23 @@ The example file looks like this (keys stay empty -- use env):
 ```powershell
 # Claude
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
-python recon_agents.py config set --provider anthropic --model claude-sonnet-4-20250514
+python recon.py agents config set --provider anthropic --model claude-sonnet-4-20250514
 
 # OpenAI
 $env:OPENAI_API_KEY = "sk-..."
-python recon_agents.py config set --provider openai --model gpt-4o-mini
+python recon.py agents config set --provider openai --model gpt-4o-mini
 
 # Gemini
 $env:GOOGLE_API_KEY = "..."
-python recon_agents.py config set --provider google --model gemini-2.0-flash
+python recon.py agents config set --provider google --model gemini-2.0-flash
 
 # OpenRouter (many models behind one key)
 $env:OPENROUTER_API_KEY = "..."
-python recon_agents.py config set --provider openrouter --model anthropic/claude-3.5-sonnet
+python recon.py agents config set --provider openrouter --model anthropic/claude-3.5-sonnet
 
 # Groq (fast open models)
 $env:GROQ_API_KEY = "..."
-python recon_agents.py config set --provider groq --model llama-3.3-70b-versatile
+python recon.py agents config set --provider groq --model llama-3.3-70b-versatile
 ```
 
 Full `llm` JSON for each provider: **`agent_config.cloud-presets.json`**.
@@ -150,7 +150,7 @@ Full `llm` JSON for each provider: **`agent_config.cloud-presets.json`**.
 
 ```powershell
 $env:XAI_API_KEY = "xai-..."
-python recon_agents.py run --target example.com --provider xai --model grok-2-latest --max-steps 6
+python recon.py agents run --target example.com --provider xai --model grok-2-latest --max-steps 6
 ```
 
 ---
@@ -158,8 +158,8 @@ python recon_agents.py run --target example.com --provider xai --model grok-2-la
 ## Switch back to local Ollama
 
 ```powershell
-python recon_agents.py config set --provider ollama --base-url http://127.0.0.1:11434 --model qwen3:8b
-python recon_agents.py check-llm
+python recon.py agents config set --provider ollama --base-url http://127.0.0.1:11434 --model qwen3:8b
+python recon.py agents check-llm
 ```
 
 VM -> Windows host Ollama: use the **Windows host IP**, e.g. `http://192.168.1.4:11434`.
@@ -187,13 +187,13 @@ So:
 | `api_key: (empty)` and HTTP 401 | Key not in env for this shell -- set `$env:...` again |
 | Still hitting port `11434` | Provider still `ollama` -- run `config set --provider xai` |
 | `check-llm` timeout | Raise timeout: `config set --timeout 180` |
-| Wrong model name | `python recon_agents.py providers` for defaults |
+| Wrong model name | `python recon.py agents providers` for defaults |
 | Works in CLI, not shell | Shell was started before `setx` -- restart shell |
 
 ```powershell
-python recon_agents.py config show
-python recon_agents.py providers
-python recon_agents.py check-llm
+python recon.py agents config show
+python recon.py agents providers
+python recon.py agents check-llm
 ```
 
 ---

@@ -6,13 +6,11 @@ CLI is the engine. Findings, proofs, and the attack graph are shell commands.
 
 | Doc | When |
 |-----|------|
-| **[OPERATIONS.md](OPERATIONS.md)** | Need **every** command / API with examples |
-| **[WORKFLOW.md](WORKFLOW.md)** | Need a full ordered hunt (phases A-O) |
-| **[USAGE.md](USAGE.md)** | Architecture, configs, troubleshooting |
+| **[USAGE.md](USAGE.md)** | Commands, modules, and one hunt |
+| **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
+| **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)** | Cloud model setup |
 | **[skills/README.md](skills/README.md)** | Skill suite design |
 | **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** | C0-C4 + mini-skill triggers |
-| **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
-| **[ROADMAP.md](ROADMAP.md)** | What's done vs planned |
 
 ## Quick launch
 
@@ -47,7 +45,7 @@ python recon.py --version
 /config ...  /check-llm  /agent ...
 ```
 
-Every command: `/cmd -h`  /  full catalog: **OPERATIONS.md**.  
+Every command: `/cmd -h`. Full catalog: **[USAGE.md](USAGE.md)**.  
 Scan progress: one bar per tool finish (`progress_ui.py`); bg jobs use log mode.
 
 ## Program profiles
@@ -74,7 +72,7 @@ Files: `config/programs/*.json`  /  env: `RECON_PROGRAM=...`
 ```
 
 ```bash
-python recon_prove.py run --target example.com
+python recon.py prove run --target example.com
 # Optional: config/exploit_policy.json -> oast_base_url, allow_sqli_boolean
 ```
 
@@ -93,35 +91,35 @@ Unified client: Ollama **or** cloud (Grok, Claude, Gemini/Gemma, OpenAI, OpenRou
 
 ```bash
 # List every provider + default model + key env name
-python recon_agents.py providers
+python recon.py agents providers
 
 # Local Ollama (from a VM: Windows host IP, not Kali IP)
-python recon_agents.py config set --provider ollama \
+python recon.py agents config set --provider ollama \
   --base-url http://192.168.1.4:11434 --model qwen3:8b
 
 # Cloud examples (set the matching API key in the environment first)
 export XAI_API_KEY=...                    # Grok
-python recon_agents.py config set --provider xai --model grok-2-latest
+python recon.py agents config set --provider xai --model grok-2-latest
 
 export ANTHROPIC_API_KEY=...              # Claude
-python recon_agents.py config set --provider anthropic --model claude-sonnet-4-20250514
+python recon.py agents config set --provider anthropic --model claude-sonnet-4-20250514
 
 export GOOGLE_API_KEY=...                 # Gemini / Gemma
-python recon_agents.py config set --provider google --model gemini-2.0-flash
-python recon_agents.py config set --provider gemma --model gemma-3-27b-it
+python recon.py agents config set --provider google --model gemini-2.0-flash
+python recon.py agents config set --provider gemma --model gemma-3-27b-it
 
 export OPENAI_API_KEY=...
-python recon_agents.py config set --provider openai --model gpt-4o-mini
+python recon.py agents config set --provider openai --model gpt-4o-mini
 
 export OPENROUTER_API_KEY=...
-python recon_agents.py config set --provider openrouter \
+python recon.py agents config set --provider openrouter \
   --model anthropic/claude-3.5-sonnet
 
-python recon_agents.py check-llm
-python recon_agents.py agents             # specialists + skill suite wiring
-python recon_agents.py run --target example.com --dry-run
+python recon.py agents check-llm
+python recon.py agents             # specialists + skill suite wiring
+python recon.py agents run --target example.com --dry-run
 # one-shot override without rewriting config:
-python recon_agents.py run --target example.com --provider xai --model grok-2-latest
+python recon.py agents run --target example.com --provider xai --model grok-2-latest
 ```
 
 ```text
@@ -142,9 +140,9 @@ PowerShell cloud quickstart (Grok):
 
 ```powershell
 $env:XAI_API_KEY = "xai-..."
-python recon_agents.py config set --provider xai --model grok-2-latest
-python recon_agents.py check-llm
-python recon_agents.py run --target example.com --max-steps 8
+python recon.py agents config set --provider xai --model grok-2-latest
+python recon.py agents check-llm
+python recon.py agents run --target example.com --max-steps 8
 ```
 
 Or: `copy config\agent_config.cloud-example.json config\agent_config.json` then set the key env.
@@ -169,9 +167,11 @@ Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
 | Role | Skill files loaded for that call |
 |------|----------------------------------|
 | planner | bug-bounty + efficiency, plus one matching vuln file |
-| analyst | fp-eval + triage-gate + exploit-prove |
-| critic | fp-eval + triage-gate |
+| specialist | bug-bounty, plus one matching vuln file |
+| analyst | fp-eval + triage-gate + exploit-prove, plus one matching vuln file |
+| critic | fp-eval + triage-gate, plus one matching vuln file |
 | review | fp-eval, plus one vuln file for that phase |
+| prove | fp-eval + exploit-prove, plus one matching vuln file |
 
 ### On-demand vuln skill (one file per call)
 
@@ -197,7 +197,7 @@ C4 report-ready
 ```
 
 ```bash
-python recon_agents.py agents    # shows suite by role + surface list
+python recon.py agents    # shows suite by role + surface list
 # RECON_AGENT_SKILL=reconkit-bug-bounty   # default
 # RECON_AGENT_SKILL=off
 # RECON_AGENT_SKILL_EXTRA=reconkit-efficiency
@@ -215,13 +215,13 @@ loads the triage-gate phase. `python recon.py agents` prints the map.
 
 ```bash
 # Surface XSS -> mini-skill reconkit-vuln-xss injects for specialist/analyst
-python recon_agents.py run --target example.com --modules xss --max-steps 4
-python reconkit.py findings reindex
-python recon_prove.py run --target example.com --technique xss_reflect
+python recon.py agents run --target example.com --modules xss --max-steps 4
+python recon.py findings reindex
+python recon.py prove run --target example.com --technique xss_reflect
 # confirmed proof ~= C2; write impact manually for C3; /critic for triage-gate
 ```
 
-Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[USAGE.md](USAGE.md#11-agent-skills)**  /  **OPERATIONS.md section 14**.
+Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[USAGE.md](USAGE.md#11-agent-skills)**.
 
 **Exploit path:** C1 -> `/prove` (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
 No reverse shells / dumps / spray lists in the default path.

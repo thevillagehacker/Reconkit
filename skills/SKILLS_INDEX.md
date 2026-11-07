@@ -4,7 +4,7 @@ Compiled from patterns in local clones under `git_skills/`
 (Bug-Bounty-Agents, bughunter-ai, claude-bug-bounty, Claude-BugHunter)
 and adapted to **reconkit** (scope gate, modules, prove, findings index).
 
-Skills apply to **local Ollama and cloud** LLMs the same way. `agents/skills.py`
+Skills apply to **local Ollama and cloud** LLMs the same way. `src/agents/skills.py`
 reads `skills/<name>/SKILL.md` and attaches that file to the call.
 
 ## Design goals (better than source packs)
@@ -103,18 +103,18 @@ scope -> recon (ordered modules) -> index/score
 cd path/to/Reconkit
 
 # Scope + LLM (local or cloud -- skills identical)
-python reconkit.py scope add example.com
-python recon_agents.py config set --provider ollama \
+python recon.py scope add example.com
+python recon.py agents config set --provider ollama \
   --base-url http://192.168.1.4:11434 --model qwen3:8b
 # or: config set --provider xai --model grok-2-latest   (with XAI_API_KEY)
 
-python recon_agents.py agents          # inspect skill suite
-python recon_agents.py run --target example.com \
+python recon.py agents          # inspect skill suite
+python recon.py agents run --target example.com \
   --modules subdomains,dns,httpprobe,xss,nuclei --max-steps 8
 
-python reconkit.py findings reindex
-python recon_prove.py queue --target example.com
-python recon_prove.py run --target example.com
+python recon.py findings reindex
+python recon.py prove queue --target example.com
+python recon.py prove run --target example.com
 
 # Shell report path
 # /report example.com
@@ -125,16 +125,17 @@ python recon_prove.py run --target example.com
 
 ## Role routing (implementation)
 
-Source of truth: `agents/skills.py` -> `ROLE_SKILLS`, `MODULE_SURFACE`,
-`SURFACE_SKILLS`, `MAX_SURFACE_SKILLS = 3`.
+Source of truth: `src/agents/skills.py` -> `ROLE_SKILLS`, `MODULE_SURFACE`,
+`SURFACE_SKILLS`. The default is one vuln file. `RECON_AGENT_SKILL_SURFACE` raises that to 3.
 
 | Role | Skill files |
 |------|-------------|
 | planner | bug-bounty, efficiency, plus one matching vuln file |
+| specialist | bug-bounty, plus one matching vuln file |
 | analyst | fp-eval, triage-gate, exploit-prove, plus one matching vuln file |
-| critic | fp-eval, triage-gate |
+| critic | fp-eval, triage-gate, plus one matching vuln file |
 | review | fp-eval, plus one vuln file for that phase |
-| prove | fp-eval, exploit-prove |
+| prove | fp-eval, exploit-prove, plus one matching vuln file |
 
 Tool modules do not call the model. The planner call is the decision. The analyst call is the report. `--review` writes one note per phase from the review files above.
 
@@ -157,12 +158,10 @@ pack. A comma list of phase filenames replaces the role default.
 `ADAPTATION.md` is attached with whichever phase file the call loads.
 Prove and the tool step do not load a hunt phase.
 
-Pre-eval (no LLM tokens): `agents/eval.py` before analyst report.
+Pre-eval (no LLM tokens): `src/agents/eval.py` before analyst report.
 
 ## See also
 
 - **[README.md](README.md)** -- overview + design principles  
 - **[USAGE.md](../USAGE.md#11-agent-skills)** -- skill usage examples  
-- **[OPERATIONS.md section 14](../OPERATIONS.md)** -- CLI catalog  
-- **[WORKFLOW.md Phase M](../WORKFLOW.md)** -- ordered hunt phase  
 - **[AGENTS.md](../AGENTS.md)** -- quick start  

@@ -16,8 +16,9 @@ The target must already be in `~/.reconkit/scope.txt`. Output is
 Inside the shell, `/<command> -h` does the same. The older form
 `python recon.py run --target example.com` still works.
 
-Other docs: [AGENTS.md](AGENTS.md), [OPERATIONS.md](OPERATIONS.md),
-[WORKFLOW.md](WORKFLOW.md), [HUNTER.md](HUNTER.md), [skills/README.md](skills/README.md).
+Other docs: [AGENTS.md](AGENTS.md), [HUNTER.md](HUNTER.md),
+[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md),
+[skills/README.md](skills/README.md).
 
 ---
 
@@ -94,7 +95,7 @@ python recon.py -v 3 example.com --modules subdomains
 | Flag | Effect |
 |------|--------|
 | `--modules a,b` | Those modules only. Default is `subdomains,dns,httpprobe,tls,wellknown,crawl`. `all` runs every module. |
-| `--resume` | Skip a tool whose output file is already non-empty. |
+| `--resume` | Skip a finished tool file. Exit 124 (the time cap) runs that tool again. An older run with only the merged file and no `tools/<stage>/` files still skips that stage. |
 | `--force` | Re-run even when output exists. |
 | `--review` | After each phase, write a model note in `reviews/<phase>.txt`. The next phase starts while the note is written. |
 | `--scope-all` | Run the same modules against every root in `scope.txt`. |
@@ -131,7 +132,7 @@ until the scan finishes.
 
 | Module | What it writes |
 |--------|----------------|
-| `subdomains` | subfinder, amass, assetfinder, chaos, findomain, crt.sh, Wayback, HackerTarget |
+| `subdomains` | subfinder, amass, assetfinder, chaos, findomain, crt.sh, OTX, Wayback, HackerTarget |
 | `permute` | Capped DNS name guesses. `dns` resolves them when both run together. |
 | `dns` | One dnsx pass: records and CNAME-takeover fingerprints |
 | `ports` | naabu on in-scope hosts, common web and data ports |
@@ -544,6 +545,10 @@ config/              agent_config.json, exploit_policy.json, programs/
     alive.txt
     urls.txt
     tools/<stage>/<tool>.txt
+    tools/<stage>/<tool>.txt.rc
+    httpprobe.json
+    diff_assets.json
+    diff_assets.md
     reviews/<phase>.txt
     proofs/
     report_draft.md
@@ -551,8 +556,14 @@ config/              agent_config.json, exploit_policy.json, programs/
     critic_review.md
 ```
 
-`subdomains.txt.prev`, `alive.txt.prev`, and `urls.txt.prev` are the previous
-run, kept for `/diff`.
+`subdomains.txt.prev`, `resolved.txt.prev`, `alive.txt.prev`, and
+`urls.txt.prev` are the previous copies used to write `diff_assets.json`.
+The first scan writes an empty diff. Alive hosts are compared by hostname.
+`/diff` compares findings after two reindexes.
+
+`tools/<stage>/<tool>.txt.rc` is that tool's exit code. `124` means
+`--resume` runs it again. A missing marker counts as finished. A missing
+httpx or crawler leaves `alive.txt` and `urls.txt` in place.
 
 ---
 
