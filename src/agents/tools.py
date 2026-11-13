@@ -166,68 +166,34 @@ def run_module(module: str, target: str, outdir: Path) -> dict[str, Any]:
 
 def run_modules(modules: list[str], target: str, outdir: Path, state: ReconState) -> list[dict]:
     results = []
-    # Publish full planned module list so the dashboard shows all tiles
-    try:
-        from live_mission import start_run
-        planned = [m for m in modules if m not in state.completed_modules]
-        if not planned:
-            planned = list(modules)
-        start_run(
-            target=target,
-            modules=planned,
-            outdir=outdir,
-            source="agent",
-        )
-    except Exception:
-        pass
-    try:
-        for m in modules:
-            if m in state.completed_modules:
-                results.append({
-                    "module": m,
-                    "success": True,
-                    "skipped": True,
-                    "reason": "already completed",
-                })
-                continue
-            if not state.deps_satisfied(m):
-                missing = [d for d in MODULE_DEPS.get(m, []) if d not in state.completed_modules]
-                results.append({
-                    "module": m,
-                    "success": False,
-                    "error": f"Prerequisites not met: {', '.join(missing)}",
-                })
-                continue
-            res = run_module(m, target, outdir)
-            results.append(res)
-            if res.get("success"):
-                state.mark(m)
-                # Store a compact finding blurb
-                outs = res.get("outputs") or []
-                state.findings[m] = {
-                    "files": [o.get("path") for o in outs if o.get("exists")],
-                    "highlights": _highlights(outs),
-                }
-            state.save()
-        return results
-    finally:
-        # Keep mission active between agent steps so the dashboard does not
-        # flicker idle while the planner thinks. Orchestrator / shell finish it.
-        try:
-            from live_mission import mark_stopped, publish
-            from run_control import CONTROL
-            if CONTROL.is_stopped():
-                mark_stopped()
-            else:
-                publish({
-                    "active": True,
-                    "status": "running",
-                    "current_tool": "",
-                    "message": "agent batch done · awaiting next plan",
-                    "current_module": "",
-                })
-        except Exception:
-            pass
+    for m in modules:
+        if m in state.completed_modules:
+            results.append({
+                "module": m,
+                "success": True,
+                "skipped": True,
+                "reason": "already completed",
+            })
+            continue
+        if not state.deps_satisfied(m):
+            missing = [d for d in MODULE_DEPS.get(m, []) if d not in state.completed_modules]
+            results.append({
+                "module": m,
+                "success": False,
+                "error": f"Prerequisites not met: {', '.join(missing)}",
+            })
+            continue
+        res = run_module(m, target, outdir)
+        results.append(res)
+        if res.get("success"):
+            state.mark(m)
+            outs = res.get("outputs") or []
+            state.findings[m] = {
+                "files": [o.get("path") for o in outs if o.get("exists")],
+                "highlights": _highlights(outs),
+            }
+        state.save()
+    return results
 
 
 def collect_module_outputs(module: str, outdir: Path) -> list[dict[str, Any]]:

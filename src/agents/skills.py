@@ -10,7 +10,7 @@ Layout (agentskills.io compatible):
 The runtime reads those files. skills/SKILLS_INDEX.md is the human map.
 The prompt lists the loaded paths and attaches the bodies. The model does
 not get a second copy of the pipeline, and it does not get every vuln pack
-on every step.
+on every step. The planner does not load a hunt phase.
 
 Env:
   RECON_AGENT_SKILL=reconkit-bug-bounty   # primary (or off)
@@ -111,16 +111,17 @@ MODULE_SURFACE: dict[str, list[str]] = {
 # One vuln pack per call. Raise with RECON_AGENT_SKILL_SURFACE (max 3).
 MAX_SURFACE_SKILLS = 1
 
-# Hunt files kept for this recon project. Bodies are attached in full.
+# Hunt files kept for report and review calls. Bodies are attached in full.
 # The char budget above does not cut them, and nothing in them is rewritten.
-# phase-00 surface map, phase-04a scope hold, phase-06 triage, phase-09 gate.
+# The planner does not load them: they are a long manual procedure, and
+# sending them again on every module choice was most of the token cost.
+# phase-04a scope hold, phase-06 triage, phase-09 gate.
 HUNT_DIR = SKILLS_DIR / "bug-bounty-hunting-prompts"
 HUNT_PHASE_DIR = HUNT_DIR / "phases"
 HUNT_SUPPORT = ("ADAPTATION.md",)
 BROWSER_MODULES = frozenset({"crawl", "js", "jsintel", "screenshots"})
 
 ROLE_HUNT_PHASES: dict[str, list[str]] = {
-    "planner": ["phase-00-recon.md"],
     "analyst": ["phase-06-triage.md"],
     "critic": ["phase-09-triage-gate.md"],
     "review": ["phase-06-triage.md"],
@@ -195,10 +196,7 @@ def hunt_phase_names(
 
     mods = {m.lower() for m in (modules or [])}
     if role == "planner":
-        names = ["phase-00-recon.md"]
-        if mods & BROWSER_MODULES:
-            names = ["phase-04a-scope.md", *names]
-        return [n for n in names if _hunt_phase_path(n) is not None]
+        return []
 
     if role == "review" and mods & BROWSER_MODULES:
         names = ["phase-04a-scope.md", "phase-06-triage.md"]
@@ -472,10 +470,7 @@ def _hunt_status() -> dict[str, Any]:
         "dir": str(HUNT_DIR) if HUNT_DIR.is_dir() else None,
         "phases": phases,
         "by_role": {
-            "planner_start": hunt_phase_names("planner"),
-            "planner_after_modules": hunt_phase_names("planner", modules=["dns"]),
-            "planner_browser": hunt_phase_names("planner", modules=["crawl"]),
-            "planner_access": hunt_phase_names("planner", context="authenticated session.json"),
+            "planner": hunt_phase_names("planner"),
             "analyst": hunt_phase_names("analyst"),
             "critic": hunt_phase_names("critic"),
             "review": hunt_phase_names("review"),

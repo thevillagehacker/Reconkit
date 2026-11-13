@@ -1,6 +1,6 @@
-# Agents, prove, programs, graph & skills -- v3.0.0
+# Agents, prove, programs & skills -- v3.0.0
 
-CLI is the engine. Findings, proofs, and the attack graph are `recon.py` commands.
+CLI is the engine. Findings and proofs are `recon.py` commands.
 
 ## Read these first
 
@@ -35,18 +35,16 @@ python recon.py har | inbox | evidence | wordlist-target
 python recon.py rate | set
 python recon.py <target> [--modules a,b] [--resume] [--review]
 python recon.py playbook list|run
-python recon.py view <target>
 python recon.py findings reindex
 python recon.py program list|show|set
 python recon.py notable | diff | doctor | tips
 python recon.py prove policy|techniques|queue|run|list|show
-python recon.py graph summary|show
 python recon.py report | critic
 python recon.py agents ...
 ```
 
 Every command: `python recon.py help <command>`. Full catalog: **[USAGE.md](USAGE.md)**.  
-Scan progress: one in-place running line on a terminal, then one result row per finished tool, then one summary (`progress_ui.py`). Warnings print on their own line. Ctrl+C stops the scan.
+A scan prints one phase line, one result row per finished tool, and one `[+] SCAN COMPLETE` line. HTTP probe prints one line per host. Warnings print on their own line. Ctrl+C stops the scan.
 
 ## Program profiles
 
@@ -79,13 +77,6 @@ python recon.py prove run --target example.com
 ```
 
 Maps to confidence **C2** when confirmed (see skill suite below).
-
-## Graph
-
-```bash
-python recon.py graph show --target example.com
-python recon.py graph summary --target example.com --min-score 40
-```
 
 ## LLM agents (local + cloud)
 
@@ -151,6 +142,18 @@ Or: `copy config\agent_config.cloud-example.json config\agent_config.json` then 
 
 VM -> Windows Ollama: host IP only (not Kali IP). Always use the `--flag` form for `agents config set`.
 
+## Agent loop
+
+`python recon.py agents <target>` is the scheduler. The full write-up is [USAGE.md](USAGE.md) section 10.
+
+The planner returns one to three modules. Python runs those reconkit stages. The tool step does not call the model. The loop continues while any runnable module is outside `skip_if_chosen`, and it stops at `max_steps` (default 12). A `done: true` answer does not end the run early. The fallback order is subdomains, dns and httpprobe, tls, crawl, js and params and content, the vuln modules, then screenshots.
+
+`alive.txt` with no lines holds back tls, wellknown, crawl, content, bypass403, cors, nuclei, and screenshots. `urls.txt` with no lines holds back the URL modules (js, params, xss, sqli, graphql, and the rest listed in USAGE).
+
+Completed modules live in `~/.reconkit/output/<target>/agent_state.json`. A non-empty output file from a normal scan counts as complete. `--dry-run` does not leave those marks behind when the output file is missing.
+
+The planner loads the skill files only. `phase-06-triage.md` loads once, on the analyst call that writes `agent_report.md`.
+
 ## Agent skill suite
 
 Inputs reviewed: **Bug-Bounty-Agents**, **bughunter-ai**, **claude-bug-bounty**,
@@ -209,9 +212,9 @@ python recon.py agents    # shows suite by role + surface list
 ```
 
 Hunting prompts in `skills/bug-bounty-hunting-prompts/phases/` are attached
-in full, unchanged. The planner loads the surface-map phase, and the scope
-phase after crawl, js, or screenshots. The analyst loads triage. `critic`
-loads the triage-gate phase. `python recon.py agents` prints the map.
+in full, unchanged, on the analyst, review, and critic calls. The planner
+uses the skill files and does not reload those phase files on every step.
+`python recon.py agents` prints the map.
 
 ### Worked example
 

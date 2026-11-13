@@ -6,7 +6,7 @@ Flow:
   2. Planner decides next agent + modules (LLM + heuristics)
   3. Specialist agent runs modules through reconkit stages
   4. Results feed back into shared state
-  5. Repeat until planner says done or max_steps hit
+  5. Repeat until no runnable module remains or max_steps is hit
   6. Analyst produces a final report
 """
 
@@ -63,19 +63,6 @@ class ReconOrchestrator:
         if self.modules_allowlist:
             allow = set(self.modules_allowlist)
             all_modules = [m for m in all_modules if m in allow]
-
-        # Full mission tile list for the dashboard (all phases this agent run may hit)
-        try:
-            from live_mission import start_run, finish_run, mark_stopped
-            pending = [m for m in all_modules if m not in state.completed_modules]
-            start_run(
-                target=self.target,
-                modules=pending or list(all_modules),
-                outdir=outdir,
-                source="agent",
-            )
-        except Exception:
-            pass
 
         self._print_header(state)
 
@@ -223,15 +210,6 @@ class ReconOrchestrator:
         print(f"Completed modules: {', '.join(state.completed_modules) or '(none)'}")
         print(f"State: {Path(state.outdir) / 'agent_state.json'}")
         print(f"Outputs: {state.outdir}")
-        try:
-            from live_mission import finish_run, mark_stopped
-            from run_control import CONTROL
-            if CONTROL.is_stopped() or state.status in ("failed", "stopped"):
-                mark_stopped(f"agent {state.status}")
-            else:
-                finish_run(ok=state.status == "completed", outdir=str(state.outdir))
-        except Exception:
-            pass
         return state
 
     def _pick_agent_for(self, modules: list[str]) -> SpecialistAgent | None:

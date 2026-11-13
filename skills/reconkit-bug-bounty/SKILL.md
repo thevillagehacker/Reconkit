@@ -72,7 +72,7 @@ subdomains
 
 - modules are chosen from the runnable list, 1 to 3, all owned by next_agent
 - technique is one id from technique_signals, or none
-- done when the core chain is complete or the remaining modules are low value
+- done only when runnable is empty or every runnable module is in skip_if_chosen
 - tool counts are already in the user message. Do not restate file bodies
 
 ## Analyst report
@@ -80,7 +80,7 @@ subdomains
 1. Executive summary  
 2. Inventory  
 3. High-interest (only ≥C1 after mental fp-eval)  
-4. Next: `/prove`, `/graph`, manual  
+4. Next: `/prove`, then a manual check  
 5. Gaps  
 
 Use triage-gate before calling anything “submit”.
@@ -88,7 +88,7 @@ Use triage-gate before calling anything “submit”.
 ## After recon (handoff)
 
 ```
-/findings reindex → /notable → /prove queue → /prove run → /graph → /report
+/findings reindex → /notable → /prove queue → /prove run → /report
 ```
 
 ## Other skill files

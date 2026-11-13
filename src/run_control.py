@@ -99,11 +99,6 @@ class RunControl:
         n = self.kill_children()
         # Always try name-based cleanup — covers orphans from prior Ctrl+C
         n += self.kill_known_tools()
-        try:
-            from live_mission import mark_stopped
-            mark_stopped("stopped by operator")
-        except Exception:
-            pass
         return n
 
     def hard_interrupt(self) -> int:
@@ -359,21 +354,7 @@ def run_interruptible(
     pumps: list[threading.Thread] = []
     aborted = False
     timed_out = False
-    last_beat = time.time()
     t0 = time.time()
-
-    def _heartbeat() -> None:
-        nonlocal last_beat
-        now = time.time()
-        if now - last_beat < 10:
-            return
-        last_beat = now
-        try:
-            from live_mission import publish
-            # Touch updated_at so the dashboard does not mark the run stale
-            publish({"active": True, "status": "running"})
-        except Exception:
-            pass
 
     def _pump(stream, sink: list[bytes], is_stdout: bool = False) -> None:
         if stream is None:
@@ -449,7 +430,6 @@ def run_interruptible(
                 except Exception:
                     CONTROL._kill_one(proc, force=True)
                 raise
-            _heartbeat()
             time.sleep(poll)
 
         for t in pumps:

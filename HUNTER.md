@@ -114,7 +114,6 @@ python recon.py example.com --resume --modules crawl,js,jsintel,apis
 python recon.py findings reindex
 python recon.py inbox --target example.com
 python recon.py evidence --target example.com
-python recon.py graph show --target example.com
 ```
 
 ```bash
@@ -184,6 +183,10 @@ The scan still chooses every module. The note says what landed, what to ignore,
 and which existing prove technique is worth a look. `reviews/summary.txt`
 is written at the end of a run that was not stopped. Read them as
 `reviews/<phase>.txt` under the target output directory.
+
+## Agent run
+
+`python recon.py <target>` runs the module list in order and does not call a model. `python recon.py agents <target>` asks the model for the next one to three modules, then runs those same stages. It keeps going until nothing runnable remains, the remaining modules are in `skip_if_chosen` because `alive.txt` or `urls.txt` is empty, or `max_steps` is reached. Output files already on disk are treated as finished. `--dry-run` only prints the plan. The batch order and the skip list are in [USAGE.md](USAGE.md) section 10.
 
 Under `~/.reconkit/output/<target>/`:
 

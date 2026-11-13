@@ -57,10 +57,10 @@ planner call. `RECON_AGENT_SKILL_MAX` caps the attached reconkit skill text
 (default 8000).
 
 `skills/bug-bounty-hunting-prompts/` holds `ADAPTATION.md` and the phase files
-this project uses. Those files are stored and attached unchanged. The char
-budget does not cut them. See **SKILLS_INDEX.md** for which call loads which
-phase. Set `RECON_AGENT_HUNT_PHASE=phase-00-recon` to force one file, or `off`
-to skip the pack.
+this project uses. Analyst, review, and critic calls attach the matching
+phase in full. The planner does not. The char budget does not cut a phase
+that is attached. See **SKILLS_INDEX.md**. Set `RECON_AGENT_HUNT_PHASE` to a
+phase filename to force that file on every call, or `off` to skip the pack.
 
 Zero-token pre-eval: `src/agents/eval.py` runs heuristics before the analyst.
 
@@ -160,7 +160,7 @@ python recon.py agents run --target example.com --max-steps 8
 1. **Kill FPs before tools** -- evaluation costs tokens once; bad modules cost minutes.  
 2. **Prove before "exploit write"** -- C2 automated canaries, then human C3 impact.  
 3. **No payload zoos in-repo** -- methodology > 10k XSS strings for local agents.  
-4. **reconkit-native** -- modules, prove, findings index, graph handoffs only.  
+4. **reconkit-native** -- modules, prove, and the findings index.  
 5. **Provider-agnostic** -- same skills for Ollama and cloud.  
 
 ## Layout

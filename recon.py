@@ -40,7 +40,6 @@ Results:
   python recon.py playbook list
   python recon.py rate stealth
   python recon.py set RECON_AMASS_TIMEOUT 900
-  python recon.py view <target>
 
 Agents:
   python recon.py agents
@@ -62,7 +61,6 @@ COMMANDS = {
     "run",
     "modules",
     "keys",
-    "view",
     "findings",
     "prove",
     "notable",
@@ -77,7 +75,6 @@ COMMANDS = {
     "eval",
     "inbox",
     "program",
-    "graph",
     "session",
     "har",
     "evidence",
@@ -194,11 +191,6 @@ def normalize_recon(args: list[str]) -> list[str] | None:
         tail = args[1:]
         if len(tail) == 1 and looks_like_target(tail[0]):
             return ["findings", "summary", tail[0]]
-        return args
-    if command == "view":
-        tail = args[1:]
-        if tail and looks_like_target(tail[0]) and "--target" not in tail:
-            return [command, "--target", tail[0], *tail[1:]]
         return args
     return args
 

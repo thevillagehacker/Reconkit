@@ -27,9 +27,8 @@
 ## 4. Suggested next steps (human)
 1. /findings reindex && /notable
 2. /prove queue && /prove run (safe validators)
-3. /graph show — attack path
-4. Manual review of … under program RoE
-5. Do not treat candidates as confirmed exploits
+3. Manual review of … under program RoE
+4. Do not treat candidates as confirmed exploits
 
 ## 5. Gaps / failures
 - Empty stages, missing tools, skipped modules

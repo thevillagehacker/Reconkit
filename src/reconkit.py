@@ -23,7 +23,7 @@ COMMANDS
   modules             List available recon modules
   prove …             Safe validation (queue/run) — also: python recon.py prove
   playbook list|run   Named module workflows
-  notable / diff / report / graph / inbox / program
+  notable / diff / report / inbox / program
   rate / set          Scan speed and per-tool time caps
   doctor / tips / eval / critic
 
@@ -806,7 +806,7 @@ def banner(text: str) -> None:
 
 
 def _hud_print(text: str) -> None:
-    """Print under the scan HUD so a spinner row is closed first."""
+    """Print one status line."""
     try:
         from progress_ui import hud_print
     except Exception:
@@ -866,8 +866,7 @@ def step(msg: str, phase: str | None = None) -> None:
         if not key:
             key = "default"
 
-    # Quiet mission mode: ship banner is printed by PipelineProgress.begin_module
-    # (unique hull per module). Skip the duplicate one-line deploy here.
+    # The pipeline prints the phase line in begin_module.
     if _PIPELINE is not None and VERBOSE < VERBOSE_DEBUG:
         return
 
@@ -5162,11 +5161,7 @@ def execution_groups(modules: list[str]) -> list[list[str]]:
 
 
 def run_stage(name: str, outdir: Path, func, *args, **kwargs):
-    """Wraps a stage_* call with cyber phase progress, timing, and file diffs.
-
-    Always publishes live_mission phase updates so the dashboard tracks
-    /run, /agent, and any other caller of run_stage.
-    """
+    """Wraps a stage_* call with a phase line, timing, and file diffs."""
     global _PIPELINE
     try:
         from run_control import CONTROL, RunStopped
@@ -5179,12 +5174,6 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
     debug(f"=== STAGE START: {name} ===")
 
     def _begin_ui() -> None:
-        # Dashboard telemetry — even when PipelineProgress is not installed (agents)
-        try:
-            from live_mission import begin_phase
-            begin_phase(name, outdir=outdir)
-        except Exception:
-            pass
         if _PIPELINE is not None:
             try:
                 _PIPELINE.begin_module(name)  # type: ignore[attr-defined]
@@ -5198,13 +5187,8 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
                 _PIPELINE.end_module(name, elapsed)  # type: ignore[attr-defined]
             except Exception:
                 pass
-        try:
-            from live_mission import end_phase
-            end_phase(name, elapsed=elapsed)
-        except Exception:
-            pass
 
-    # The progress HUD is one object. Overlapping phases take turns updating it.
+    # One phase line at a time. Overlapping phases take turns.
     with _STAGE_UI_LOCK:
         _begin_ui()
     t0 = time.time()
@@ -5231,7 +5215,7 @@ def run_stage(name: str, outdir: Path, func, *args, **kwargs):
         else:
             debug("    (no files created or changed by this stage)")
     elif VERBOSE >= VERBOSE_NORMAL and _PIPELINE is None:
-        # The pipeline already printed the phase bar with this elapsed time.
+        # The pipeline already printed the phase line.
         ok(f"stage {name} finished in {elapsed:.1f}s")
     try:
         from agents.supervisor import schedule_phase_review
@@ -5290,15 +5274,6 @@ def cmd_run(args) -> None:
         fail(str(exc))
         sys.exit(1)
     outdir.mkdir(parents=True, exist_ok=True)
-
-    # Always seed live tracker before stages (dashboard polls this file).
-    # source= distinguishes a playbook, the agent, and a direct scan
-    source = str(getattr(args, "source", None) or "pipeline").strip() or "pipeline"
-    try:
-        from live_mission import start_run
-        start_run(target=target, modules=list(modules), outdir=outdir, source=source)
-    except Exception:
-        pass
 
     try:
         from progress_ui import PipelineProgress
@@ -5383,16 +5358,9 @@ def cmd_run(args) -> None:
             print(f"All output saved under: {outdir}")
         stopped = run_error is not None and run_error.__class__.__name__ == "RunStopped"
         try:
-            from live_mission import finish_run
             from run_control import CONTROL
-            if CONTROL.is_stopped() or stopped:
-                from live_mission import mark_stopped
-                mark_stopped()
+            if CONTROL.is_stopped():
                 stopped = True
-            elif run_error is not None:
-                finish_run(ok=False, outdir=str(outdir), message=str(run_error)[:200])
-            else:
-                finish_run(ok=True, outdir=str(outdir))
         except Exception:
             pass
         _PIPELINE = None
@@ -5631,13 +5599,6 @@ def _release_finished_copies(outdir: Path) -> None:
 # --------------------------------------------------------------------------- #
 # argparse wiring
 # --------------------------------------------------------------------------- #
-
-def cmd_view(args) -> None:
-    """Open the local scan view. It follows a scan; it does not start one."""
-    from scan_view import open_view
-
-    open_view(getattr(args, "target", "") or "")
-
 
 def cmd_notable(args) -> None:
     from findings.indexer import query_store
@@ -5948,27 +5909,6 @@ def cmd_program(args) -> None:
     info("run findings reindex so scores pick up new weights")
 
 
-def cmd_graph(args) -> None:
-    from graph.builder import build_graph, graph_summary
-
-    action = (getattr(args, "graph_action", "") or "summary").lower()
-    target = (getattr(args, "target", "") or "").strip() or None
-    min_score = int(getattr(args, "min_score", None) or 0)
-    graph = build_graph(target=target, min_score=min_score)
-    banner(f"attack graph{f' — {target}' if target else ''}")
-    print(graph_summary(graph))
-    if action == "show":
-        print()
-        nodes = graph.get("nodes") or []
-        for node in nodes[:25]:
-            print(
-                f"  [{node.get('kind'):7}] {node.get('label', '')[:50]}  "
-                f"score={node.get('score')} sev={node.get('severity')}"
-            )
-        if len(nodes) > 25:
-            print(f"  … +{len(nodes) - 25} nodes")
-
-
 def cmd_findings(args) -> None:
     """CLI for findings index."""
     from findings.indexer import get_or_build_index, index_all_targets, index_target
@@ -6235,13 +6175,6 @@ def build_parser() -> argparse.ArgumentParser:
     keys_remove_p.add_argument("name")
     keys_parser.set_defaults(func=cmd_keys)
 
-    view_parser = sub.add_parser(
-        "view",
-        help="Open the local scan view for a target (does not start a scan)",
-    )
-    view_parser.add_argument("--target", default="", help="Target whose output to follow")
-    view_parser.set_defaults(func=cmd_view)
-
     findings_parser = sub.add_parser(
         "findings",
         help="Build or show unified findings index from ~/.reconkit/output",
@@ -6375,17 +6308,6 @@ def build_parser() -> argparse.ArgumentParser:
     program_set = program_sub.add_parser("set", help="Select a profile")
     program_set.add_argument("name")
     program_set.set_defaults(func=cmd_program)
-
-    graph_parser = sub.add_parser("graph", help="Attack graph from the findings index")
-    graph_sub = graph_parser.add_subparsers(dest="graph_action", required=True)
-    for graph_name, graph_help in (
-        ("summary", "Print graph counts"),
-        ("show", "Print counts and the first nodes"),
-    ):
-        graph_cmd = graph_sub.add_parser(graph_name, help=graph_help)
-        graph_cmd.add_argument("--target", default="")
-        graph_cmd.add_argument("--min-score", dest="min_score", type=int, default=0)
-        graph_cmd.set_defaults(func=cmd_graph)
 
     return parser
 

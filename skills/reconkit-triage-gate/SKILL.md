@@ -67,4 +67,4 @@ Overclaiming burns trust. Prefer Medium solid over Critical theoretical.
 
 In `agent_report.md` section 3, only list findings that pass Q1–Q3 at minimum.
 Attach prove status when C2+.
-Recommend `/prove` and `/graph` for remaining C1.
+Recommend `/prove` for remaining C1.

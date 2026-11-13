@@ -80,8 +80,8 @@ _PLANNER_RULES = (
     "Use last_step. Those lines are the tool that just finished.\n"
     "Prefer the runnable module that reads a non-empty file the completed modules have not used.\n"
     "A non-empty cname_takeover_candidates.txt is already a finding: do not pick dns again.\n"
-    "Set done to true when runnable is empty, when every runnable module is listed in skip_if_chosen, "
-    "or when the counts do not justify another module.\n"
+    "Set done to true only when runnable is empty or every runnable module is listed in skip_if_chosen.\n"
+    "While any other runnable module remains, name the next 1 to 3 of them.\n"
     "technique is one id from technique_signals, or none. Name it from the files. Do not run it.\n"
     "Do not invent modules, widen scope, or mention sqlmap, shells, or dumps."
 )
@@ -258,7 +258,6 @@ def planner_messages(state: ReconState, runnable: list[str]) -> list[dict[str, s
     # reason to attach every vuln pack before those tools have output.
     skill = skill_system_block(
         role="planner",
-        max_chars=4500,
         context=brief[:1500],
         modules=list(state.completed_modules or [])[-4:],
     )
@@ -394,6 +393,22 @@ class PlannerAgent:
 
         if agent not in AGENT_MODULES and not done:
             agent = self._agent_for_modules(modules) if modules else None
+
+        # A model "done" used to end the run after one module. Keep going
+        # while a runnable module is still outside skip_if_chosen.
+        open_mods = [m for m in runnable if m not in skipped]
+        if done and open_mods:
+            done = False
+            if not modules:
+                fallback = self._heuristic_from_lists(
+                    runnable, remaining, plan, skipped, Path(state.outdir),
+                )
+                if technique != "none":
+                    fallback["technique"] = technique
+                fallback["reasoning"] = (
+                    "Continuing the pipeline. " + str(fallback.get("reasoning") or "")
+                ).strip()
+                return fallback
 
         if not done and not modules:
             fallback = self._heuristic_from_lists(

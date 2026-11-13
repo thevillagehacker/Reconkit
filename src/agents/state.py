@@ -148,27 +148,49 @@ class ReconState:
         return st
 
     def sync_from_disk(self) -> None:
-        """Mark modules complete if their primary output files already exist and are non-empty."""
+        """Mark modules complete when their output files already have lines.
+
+        A dry-run records modules in this file without writing those outputs.
+        Those marks are dropped so the next real run still executes them.
+        """
         outdir = Path(self.outdir)
-        if not outdir.exists():
-            return
-        for module, files in MODULE_OUTPUTS.items():
-            if module in self.completed_modules:
-                continue
-            if module == "nuclei":
-                if any(outdir.glob("nuclei_*.txt")):
+        evidenced: set[str] = set()
+        if outdir.is_dir():
+            for module, files in MODULE_OUTPUTS.items():
+                if not self._module_has_output(outdir, module, files):
+                    continue
+                evidenced.add(module)
+                if module not in self.completed_modules:
                     self.mark(module)
+        self.completed_modules = [
+            module
+            for module in self.completed_modules
+            if module in evidenced or not self._dry_run_only(module)
+        ]
+
+    def _dry_run_only(self, module: str) -> bool:
+        saw_dry = False
+        for step in self.history:
+            if module not in (step.get("modules") or []):
                 continue
-            if module == "screenshots":
-                shot = outdir / "screenshots"
-                if shot.exists() and any(shot.iterdir()):
-                    self.mark(module)
+            if (step.get("details") or {}).get("dry_run"):
+                saw_dry = True
                 continue
-            for f in files:
-                p = outdir / f
-                if p.exists() and p.stat().st_size > 0:
-                    self.mark(module)
-                    break
+            return False
+        return saw_dry
+
+    @staticmethod
+    def _module_has_output(outdir: Path, module: str, files: list[str]) -> bool:
+        if module == "nuclei":
+            return any(outdir.glob("nuclei_*.txt"))
+        if module == "screenshots":
+            shot = outdir / "screenshots"
+            return shot.is_dir() and any(shot.iterdir())
+        for name in files:
+            path = outdir / name
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        return False
 
 
 def _now() -> str:

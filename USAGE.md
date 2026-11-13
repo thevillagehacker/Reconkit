@@ -49,14 +49,12 @@ Other docs: [AGENTS.md](AGENTS.md), [HUNTER.md](HUNTER.md),
 | HAR import | `python recon.py har --target example.com --file capture.har` |
 | Evidence zip | `python recon.py evidence --target example.com` |
 | Target wordlist | `python recon.py wordlist-target --target example.com` |
-| Scan view | `python recon.py view example.com` |
 | Quick playbook | `python recon.py playbook run quick --target example.com` |
 | Full playbook | `python recon.py playbook run full --target example.com` |
 | Playbook list | `python recon.py playbook list` |
 | Notable scores | `python recon.py notable --target example.com` |
 | Diff | `python recon.py diff --target example.com` |
 | Report draft | `python recon.py report --target example.com` |
-| Attack graph | `python recon.py graph show --target example.com` |
 | Program weights | `python recon.py program set example-web` |
 | Inbox | `python recon.py inbox --target example.com` |
 | Rate | `python recon.py rate stealth` |
@@ -104,8 +102,26 @@ Each result is written once. Per-source subdomain and crawl lists go to
 and the merge file (`subdomains.txt`, `urls.txt`) is rebuilt from those lists.
 A stage with one result writes that file at the output root (`alive.txt`,
 `dns_records.txt`, `resolved.txt`, `tls_recon.json`, `wellknown.txt`) and keeps
-the exit code in `tools/<stage>/<tool>.txt.rc`. On a terminal, one running
-line stays in place. Each finished tool then prints one result row.
+the exit code in `tools/<stage>/<tool>.txt.rc`.
+
+A scan prints plain status lines.
+
+```text
+[*] example.com  6 modules: subdomains, dns, httpprobe, tls, wellknown, crawl
+[*] Ctrl+C stops this scan
+[*] 1/6 Subdomain enum  passive
+[+]  1/9  subfinder           45  00:00:31
+[*]  2/9  amass            skip  00:03:00  resume
+[+]  9/9 tools  8 ok · 1 skip  00:04:10
+[*] 3/6 HTTP probe  active
+[+]  1/40  https://www.example.com  200
+[-]  old.example.com  no response
+[*] JS fetch/secrets  12
+[+]  12/12  JS fetch/secrets  00:01:04
+[+] SCAN COMPLETE  6 modules  00:12:00  ~/.reconkit/output/example.com
+```
+
+`[*]` is a phase, a skipped tool, or the start of a host loop. `[+]` is a finished tool, a host that answered, a finished host loop, or the scan complete line. `[-]` is a failed tool or a host with no response. `[!]` is a warning and prints on its own line. HTTP probe prints one line per host. A host loop such as JavaScript fetch or ffuf prints one start line and one finished count. `Ctrl+C` stops the scan.
 
 ```bash
 python recon.py example.com
@@ -223,7 +239,7 @@ for a target is `~/.reconkit/output/<target>/`.
 
 ## 6. Results
 
-Reindex after a scan so scores, diffs, the graph, and prove see the new files.
+Reindex after a scan so scores, diffs, and prove see the new files.
 
 ```bash
 python recon.py findings reindex
@@ -234,8 +250,6 @@ python recon.py report --target example.com
 python recon.py report --target example.com --all
 python recon.py inbox --target example.com
 python recon.py eval --target example.com
-python recon.py graph summary --target example.com
-python recon.py graph show --target example.com --min-score 40
 python recon.py program list
 python recon.py program show
 python recon.py program set example-web
@@ -250,7 +264,6 @@ python recon.py program set example-web
 | `report` | `report_draft.md` in the target folder. Notable rows unless `--all`. |
 | `inbox` | C2 proofs first, then high-score C1 rows, each with a prove technique |
 | `eval` | Local C0-C4 labels. `--llm` asks the configured model about borderline rows. |
-| `graph show` | Target, host, finding, and proof links. `--min-score 40` hides low scores. |
 
 Profiles are `config/programs/*.json`. `RECON_PROGRAM=example-web` is the same
 switch. Set the profile, then reindex, or the weights are not in the scores.
@@ -400,6 +413,39 @@ python recon.py critic --target example.com
 | visual | screenshots |
 | analyst | Final `agent_report.md` |
 
+### How a run proceeds
+
+`python recon.py agents example.com` asks the model which modules to run next. Python then runs those reconkit stages. The planner only chooses the batch.
+
+1. The planner receives `reconkit-bug-bounty` and `reconkit-efficiency`, plus one vuln skill when a finished module matches. It answers with one JSON object: `done`, one specialist, and one to three module names.
+2. Python runs that batch and writes the usual output files.
+3. The next planner call sees the new file counts. The loop repeats until no runnable module remains, every remaining runnable module is listed in `skip_if_chosen`, or `max_steps` is reached. The default is 12 (`python recon.py agents config set --max-steps 20`, or `--max-steps` on the run).
+4. The analyst writes `agent_report.md`. That call is the one that loads `phase-06-triage.md`. The planner call carries the skill files only.
+
+A planner answer of `done: true` is ignored while a runnable module is still outside `skip_if_chosen`. The fallback batch order is:
+
+```text
+subdomains
+dns + httpprobe
+tls
+crawl
+js + params + content
+nuclei + xss + sqli, then the rest of the vuln modules
+screenshots
+```
+
+The model can still name a different valid batch of one to three modules owned by one specialist. `skip_if_chosen` is part of the planner brief:
+
+| Condition | Modules held back |
+|-----------|-------------------|
+| `alive.txt` has no lines | tls, wellknown, crawl, content, bypass403, cors, nuclei, screenshots |
+| `urls.txt` has no lines | js, jsintel, params, apis, gfextra, xss, sqli, ssrf_ssti, redirect, graphql, cloud, takeover_plus, gitrecon |
+| No `graphql` token in the alive, tech-route, or URL head | graphql |
+
+`~/.reconkit/output/<target>/agent_state.json` remembers completed modules. A non-empty output file from an earlier `python recon.py example.com` scan marks that module complete on the next agent load, so the agent does not repeat it. Delete that target's output directory to start clean.
+
+`--dry-run` prints the batches and does not run tools. Those planned modules are dropped from `agent_state.json` on the next load when the output file is missing, so a later real run still executes them. `--approve` asks before each tool batch. `--modules a,b` limits what the planner may choose. `--skip-analyst` skips `agent_report.md`.
+
 Set the provider key in the environment before `config set` (`XAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
 `GROQ_API_KEY`). From a VM, Ollama's base URL is the Windows host IP, not the
@@ -441,8 +487,7 @@ the phase. `RECON_AGENT_HUNT_PHASE=off` skips the pack.
 
 | Call | Phase file |
 |------|------------|
-| Planner | `phase-00-recon.md` |
-| Planner, after crawl, js, or screenshots | `phase-04a-scope.md`, then `phase-00-recon.md` |
+| Planner | none. The skill files carry the module pipeline. |
 | Analyst | `phase-06-triage.md` |
 | Critic | `phase-09-triage-gate.md` |
 | Review (`--review`) | `phase-06-triage.md` |
@@ -468,7 +513,7 @@ Confidence used by the skills and by `python recon.py eval`:
 
 ```text
 recon.py
-src/                 reconkit, prove, agents, findings, graph, hunter, programs
+src/                 reconkit, prove, agents, findings, hunter, programs
 skills/              SKILL.md packs and bug-bounty-hunting-prompts/
 config/              agent_config.json, exploit_policy.json, programs/
 ```
@@ -540,7 +585,9 @@ is written when nuclei or screenshots need a URL-only list.
 | prove queue is empty | Reindex, then `python recon.py prove queue --target example.com --all` |
 | prove says out of scope | `scope add`, then confirm |
 | critic fails | `python recon.py agents check-llm`, and an `agent_report.md` or `report_draft.md` |
-| graph is empty | Reindex, then `python recon.py graph show --target example.com --min-score 40` |
+| agent run starts no tools | That target already has output files or completed modules in `agent_state.json`. Delete `~/.reconkit/output/<target>/` to start clean, or pass modules that have not run. |
+| agent stops while modules remain | The step cap was reached. Run `python recon.py agents example.com --max-steps 20`. |
+| agent skips crawl, nuclei, or xss | `alive.txt` or `urls.txt` is empty, so those modules are in `skip_if_chosen`. Re-run HTTP probe or crawl, then start the agent again. |
 | program weights missing | `python recon.py program set example-web`, then reindex |
 | check-llm connection refused | From a VM, set `--base-url` to the Windows host IP, not the VM IP |
 | cloud auth error | Export the provider key, then `python recon.py agents check-llm` |
@@ -561,6 +608,5 @@ python recon.py findings example.com
 python recon.py prove example.com --dry-run
 python recon.py notable --target example.com
 python recon.py inbox --target example.com
-python recon.py graph show --target example.com
 python recon.py report --target example.com
 ```

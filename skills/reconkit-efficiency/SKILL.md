@@ -40,13 +40,11 @@ Score ≈ (impact_if_true × confidence_gain) / (time + noise + tokens)
 | content fuzz | high | Cap hosts; after tech fingerprint |
 | screenshots | medium | End only |
 
-## Early-stop rules
+## Stop rules
 
-Set `done=true` when any hold:
+Set `done=true` only when `runnable` is empty, or every runnable module is listed in `skip_if_chosen`.
 
-1. Core chain complete: `subdomains` + `httpprobe` + (`crawl` or no alive) + (`nuclei` or `js`)
-2. Remaining only low-ROI (e.g. screenshots) and max_steps tight
-3. Two consecutive empty high-cost modules and tools look broken → recommend `/doctor`, stop looping
+Name the next 1–3 runnable modules that are not in `skip_if_chosen`. A finished core chain is not a reason to stop while those modules remain. `skip_if_chosen` already holds modules that have no alive hosts or no URLs.
 
 ## Token hygiene for Ollama
 

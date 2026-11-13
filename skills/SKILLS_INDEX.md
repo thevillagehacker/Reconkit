@@ -120,7 +120,6 @@ python recon.py prove run --target example.com
 # /report example.com
 # /critic example.com
 # /prove list example.com
-# /graph show example.com
 ```
 
 ## Role routing (implementation)
@@ -148,8 +147,7 @@ pack. A comma list of phase filenames replaces the role default.
 
 | Call | Phase file |
 |------|------------|
-| planner | `phase-00-recon.md` |
-| planner, after crawl / js / screenshots | `phase-04a-scope.md`, then `phase-00-recon.md` |
+| planner | none. The skill files carry the module pipeline. |
 | analyst | `phase-06-triage.md` |
 | critic | `phase-09-triage-gate.md` |
 | review | `phase-06-triage.md` |
