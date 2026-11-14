@@ -193,4 +193,4 @@ skills/
 ```
 
 Loader: `src/agents/skills.py`  /  pre-eval: `src/agents/eval.py`  
-User docs: **[USAGE.md](../USAGE.md#11-agent-skills)**  /  **[HUNTER.md](../HUNTER.md)**  /  **[AGENTS.md](../AGENTS.md)**.
+User docs: **[README.md](../README.md#11-agent-skills)**  /  **[AGENTS.md](../AGENTS.md)**.

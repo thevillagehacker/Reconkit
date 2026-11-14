@@ -160,6 +160,6 @@ Pre-eval (no LLM tokens): `src/agents/eval.py` before analyst report.
 
 ## See also
 
-- **[README.md](README.md)** -- overview + design principles  
-- **[USAGE.md](../USAGE.md#11-agent-skills)** -- skill usage examples  
+- **[skills/README.md](README.md)** -- skill suite overview  
+- **[README.md](../README.md#11-agent-skills)** -- command catalog and skill usage  
 - **[AGENTS.md](../AGENTS.md)** -- quick start  

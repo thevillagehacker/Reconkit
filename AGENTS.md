@@ -6,8 +6,7 @@ CLI is the engine. Findings and proofs are `recon.py` commands.
 
 | Doc | When |
 |-----|------|
-| **[USAGE.md](USAGE.md)** | Commands, modules, and one hunt |
-| **[HUNTER.md](HUNTER.md)** | Session, HAR, inbox, extra modules |
+| **[README.md](README.md)** | Commands, modules, session, HAR, and one hunt |
 | **[config/CLOUD_LLM_SETUP.md](config/CLOUD_LLM_SETUP.md)** | Cloud model setup |
 | **[skills/README.md](skills/README.md)** | Skill suite design |
 | **[skills/SKILLS_INDEX.md](skills/SKILLS_INDEX.md)** | C0-C4 + mini-skill triggers |
@@ -43,7 +42,7 @@ python recon.py report | critic
 python recon.py agents ...
 ```
 
-Every command: `python recon.py help <command>`. Full catalog: **[USAGE.md](USAGE.md)**.  
+Every command: `python recon.py help <command>`. Full catalog: **[README.md](README.md)**.  
 A scan prints one phase line, one result row per finished tool, and one `[+] SCAN COMPLETE` line. HTTP probe prints one line per host. Warnings print on their own line. Ctrl+C stops the scan.
 
 ## Program profiles
@@ -144,11 +143,11 @@ VM -> Windows Ollama: host IP only (not Kali IP). Always use the `--flag` form f
 
 ## Agent loop
 
-`python recon.py agents <target>` is the scheduler. The full write-up is [USAGE.md](USAGE.md) section 10.
+`python recon.py agents <target>` is the scheduler. The full write-up is [README.md](README.md#10-agents).
 
 The planner returns one to three modules. Python runs those reconkit stages. The tool step does not call the model. The loop continues while any runnable module is outside `skip_if_chosen`, and it stops at `max_steps` (default 12). A `done: true` answer does not end the run early. The fallback order is subdomains, dns and httpprobe, tls, crawl, js and params and content, the vuln modules, then screenshots.
 
-`alive.txt` with no lines holds back tls, wellknown, crawl, content, bypass403, cors, nuclei, and screenshots. `urls.txt` with no lines holds back the URL modules (js, params, xss, sqli, graphql, and the rest listed in USAGE).
+`alive.txt` with no lines holds back tls, wellknown, crawl, content, bypass403, cors, nuclei, and screenshots. `urls.txt` with no lines holds back the URL modules (js, params, xss, sqli, graphql, and the rest listed in [README.md](README.md#10-agents)).
 
 Completed modules live in `~/.reconkit/output/<target>/agent_state.json`. A non-empty output file from a normal scan counts as complete. `--dry-run` does not leave those marks behind when the output file is missing.
 
@@ -226,7 +225,7 @@ python recon.py prove run --target example.com --technique xss_reflect
 # confirmed proof ~= C2; write impact manually for C3; critic for triage-gate
 ```
 
-Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[USAGE.md](USAGE.md#11-agent-skills)**.
+Details: **`skills/README.md`**  /  **`skills/SKILLS_INDEX.md`**  /  **[README.md](README.md#11-agent-skills)**.
 
 **Exploit path:** C1 -> prove (C2) -> PoC draft -> human impact (C3) -> triage (C4).  
 No reverse shells / dumps / spray lists in the default path.
